@@ -101,11 +101,12 @@ export default function VentaComercialPage() {
     <div className="mx-auto max-w-2xl">
       <h1 className="text-2xl font-semibold text-slate-900">Venta comercial</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Vende directamente del almacén por transferencia. Escanea todos los productos y luego genera la factura.
+        Venta a otra empresa o taller, directamente del stock del almacén central (no de tu propio stock),
+        siempre por transferencia bancaria. Escanea todos los productos y luego genera la factura.
       </p>
 
       <div className="card mt-6">
-        <label className="label-field">Punto de venta / cliente *</label>
+        <label className="label-field">Empresa o taller (cliente) *</label>
         <select className="input-field mb-4" value={posId} onChange={(e) => setPosId(e.target.value)}>
           <option value="">Selecciona…</option>
           {pointsOfSale.map((p) => (

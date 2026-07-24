@@ -13,35 +13,53 @@ const updateSchema = z.object({
 
 // PATCH /api/users/:id -> editar usuario (solo admin)
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const supabase = createRouteClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+  try {
+    const supabase = createRouteClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
-  if (profile?.role !== 'admin') return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+    if (profile?.role !== 'admin') return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
 
-  const parsed = updateSchema.safeParse(await req.json());
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    const parsed = updateSchema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join(' · ') }, { status: 400 });
+    }
 
-  const { error } = await supabase.from('profiles').update(parsed.data).eq('id', params.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+    const { error } = await supabase.from('profiles').update(parsed.data).eq('id', params.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error('PATCH /api/users/[id]', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Error inesperado al editar el usuario' },
+      { status: 500 }
+    );
+  }
 }
 
 // DELETE /api/users/:id -> desactiva (no borra físicamente, por trazabilidad)
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
-  const supabase = createRouteClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+  try {
+    const supabase = createRouteClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
-  if (profile?.role !== 'admin') return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+    if (profile?.role !== 'admin') return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
 
-  const { error } = await supabase.from('profiles').update({ active: false }).eq('id', params.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+    const { error } = await supabase.from('profiles').update({ active: false }).eq('id', params.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/users/[id]', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Error inesperado al desactivar el usuario' },
+      { status: 500 }
+    );
+  }
 }

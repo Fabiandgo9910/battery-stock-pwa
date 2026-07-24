@@ -22,8 +22,9 @@ export default function PosPage() {
   const [rows, setRows] = useState<PosRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [toDeactivate, setToDeactivate] = useState<PosRow | null>(null);
+  const [toDelete, setToDelete] = useState<PosRow | null>(null);
 
   const [name, setName] = useState('');
   const [ownerName, setOwnerName] = useState('');
@@ -50,31 +51,56 @@ export default function PosPage() {
     setAddress('');
     setTaxId('');
     setShowForm(false);
+    setEditingId(null);
   }
 
-  async function create(e: React.FormEvent) {
+  function startEdit(r: PosRow) {
+    setEditingId(r.id);
+    setName(r.name);
+    setOwnerName(r.owner_name ?? '');
+    setPhone(r.phone ?? '');
+    setAddress(r.address ?? '');
+    setShowForm(true);
+  }
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    const res = await fetch('/api/points-of-sale', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, owner_name: ownerName, phone, address, tax_id: taxId }),
-    });
+    const payload = { name, owner_name: ownerName, phone, address, tax_id: taxId };
+    const res = editingId
+      ? await fetch(`/api/points-of-sale/${editingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      : await fetch('/api/points-of-sale', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+    const json = await res.json().catch(() => ({}));
     setSubmitting(false);
     if (!res.ok) {
-      toast.error('Error al crear el punto de venta.');
+      toast.error(json.error || 'Error al guardar el punto de venta.');
       return;
     }
-    toast.success('Punto de venta creado.');
+    toast.success(editingId ? 'Punto de venta actualizado.' : 'Punto de venta creado.');
     resetForm();
     load();
   }
 
-  async function confirmDeactivate() {
-    if (!toDeactivate) return;
-    await fetch(`/api/points-of-sale/${toDeactivate.id}`, { method: 'DELETE' });
-    toast.success('Punto de venta desactivado.');
-    setToDeactivate(null);
+  async function confirmDelete() {
+    if (!toDelete) return;
+    setSubmitting(true);
+    const res = await fetch(`/api/points-of-sale/${toDelete.id}`, { method: 'DELETE' });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    setToDelete(null);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al eliminar el punto de venta.');
+      return;
+    }
+    toast.success(json.deactivatedInstead ? json.message : 'Punto de venta eliminado.');
     load();
   }
 
@@ -83,15 +109,17 @@ export default function PosPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Puntos de venta</h1>
-          <p className="mt-1 text-sm text-slate-500">Clientes/chiringuitos con su stock actual por modelo.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Empresas o talleres a los que el comercial vende directamente desde almacén.
+          </p>
         </div>
-        <button className="btn-charge" onClick={() => setShowForm(!showForm)}>
+        <button className="btn-charge" onClick={() => (showForm ? resetForm() : setShowForm(true))}>
           {showForm ? 'Cerrar' : '+ Nuevo'}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={create} className="card mt-6 space-y-4">
+        <form onSubmit={submit} className="card mt-6 space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label-field">Nombre *</label>
@@ -115,7 +143,7 @@ export default function PosPage() {
             </div>
           </div>
           <button type="submit" disabled={submitting} className="btn-charge w-full">
-            {submitting ? 'Guardando…' : 'Crear punto de venta'}
+            {submitting ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear punto de venta'}
           </button>
         </form>
       )}
@@ -132,11 +160,10 @@ export default function PosPage() {
                 <p className="text-sm text-slate-500">{r.owner_name} {r.phone && `· ${r.phone}`}</p>
                 {r.address && <p className="text-xs text-slate-400">{r.address}</p>}
               </div>
-              {r.active && (
-                <button className="btn-secondary text-red-600" onClick={() => setToDeactivate(r)}>
-                  Desactivar
-                </button>
-              )}
+              <div className="flex gap-2">
+                <button className="btn-secondary" onClick={() => startEdit(r)}>Editar</button>
+                <button className="btn-secondary text-red-600" onClick={() => setToDelete(r)}>Eliminar</button>
+              </div>
             </div>
             {r.pos_stock?.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
@@ -152,13 +179,14 @@ export default function PosPage() {
       </div>
 
       <ConfirmModal
-        open={!!toDeactivate}
-        title="Desactivar punto de venta"
-        description={`${toDeactivate?.name} dejará de estar disponible en los listados activos.`}
-        confirmLabel="Desactivar"
+        open={!!toDelete}
+        title="Eliminar punto de venta"
+        description={`Vas a eliminar ${toDelete?.name}. Si tiene ventas o facturas asociadas, se desactivará en su lugar para no perder el histórico.`}
+        confirmLabel="Eliminar"
         tone="danger"
-        onConfirm={confirmDeactivate}
-        onCancel={() => setToDeactivate(null)}
+        loading={submitting}
+        onConfirm={confirmDelete}
+        onCancel={() => setToDelete(null)}
       />
     </div>
   );

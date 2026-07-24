@@ -96,7 +96,9 @@ export default function VenderPage() {
   return (
     <div className="mx-auto max-w-lg">
       <h1 className="text-2xl font-semibold text-slate-900">Vender batería</h1>
-      <p className="mt-1 text-sm text-slate-500">Escanea la batería que vas a vender al cliente.</p>
+      <p className="mt-1 text-sm text-slate-500">
+        Venta a un cliente particular, desde el stock que llevas en tu furgoneta (el que te entregó el almacén).
+      </p>
 
       <div className="card mt-6">
         {!model && (

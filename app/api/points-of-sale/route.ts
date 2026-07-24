@@ -12,40 +12,59 @@ const schema = z.object({
   notes: z.string().optional(),
 });
 
-// GET /api/points-of-sale -> lista con su stock por modelo
-export async function GET() {
-  const supabase = createRouteClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+async function requireCommercialOrAdmin(supabase: ReturnType<typeof createRouteClient>) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { error: NextResponse.json({ error: 'No autenticado' }, { status: 401 }) };
 
-  const { data, error } = await supabase
-    .from('points_of_sale')
-    .select('*, pos_stock(quantity, product_model:product_models(brand, model_name))')
-    .order('name');
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ points_of_sale: data });
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+  if (!profile || !['admin', 'comercial'].includes(profile.role)) {
+    return { error: NextResponse.json({ error: 'No autorizado' }, { status: 403 }) };
+  }
+  return { session };
 }
 
-// POST /api/points-of-sale -> crea punto de venta
+// GET /api/points-of-sale -> lista con su stock por modelo (admin/comercial)
+export async function GET() {
+  try {
+    const supabase = createRouteClient();
+    const guard = await requireCommercialOrAdmin(supabase);
+    if (guard.error) return guard.error;
+
+    const { data, error } = await supabase
+      .from('points_of_sale')
+      .select('*, pos_stock(quantity, product_model:product_models(brand, model_name))')
+      .order('name');
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ points_of_sale: data });
+  } catch (err) {
+    console.error('GET /api/points-of-sale', err);
+    return NextResponse.json({ error: 'Error inesperado al listar puntos de venta' }, { status: 500 });
+  }
+}
+
+// POST /api/points-of-sale -> crea punto de venta / cliente (admin/comercial)
 export async function POST(req: NextRequest) {
-  const supabase = createRouteClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+  try {
+    const supabase = createRouteClient();
+    const guard = await requireCommercialOrAdmin(supabase);
+    if (guard.error) return guard.error;
 
-  const parsed = schema.safeParse(await req.json());
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    const parsed = schema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join(' · ') }, { status: 400 });
+    }
 
-  const { data, error } = await supabase
-    .from('points_of_sale')
-    .insert({ ...parsed.data, created_by: session.user.id })
-    .select()
-    .single();
+    const { data, error } = await supabase
+      .from('points_of_sale')
+      .insert({ ...parsed.data, created_by: guard.session!.user.id })
+      .select()
+      .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ point_of_sale: data });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ point_of_sale: data });
+  } catch (err) {
+    console.error('POST /api/points-of-sale', err);
+    return NextResponse.json({ error: 'Error inesperado al crear el punto de venta' }, { status: 500 });
+  }
 }

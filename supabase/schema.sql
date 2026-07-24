@@ -128,7 +128,7 @@ create table suppliers (
 create table receptions (
   id uuid primary key default uuid_generate_v4(),
   warehouse_id uuid not null references warehouses(id),
-  supplier_id uuid not null references suppliers(id),
+  supplier_id uuid references suppliers(id) on delete set null,
   received_by uuid not null references profiles(id),
   received_at timestamptz not null default now(),
   notes text,
@@ -234,7 +234,7 @@ create table sales (
   id uuid primary key default uuid_generate_v4(),
   seller_id uuid not null references profiles(id), -- conductor o comercial
   sale_channel text not null, -- 'driver' | 'commercial' | 'pos'
-  point_of_sale_id uuid references points_of_sale(id),
+  point_of_sale_id uuid references points_of_sale(id) on delete set null,
   payment_method payment_method not null,
   amount_cash numeric(12,2) not null default 0,
   amount_card numeric(12,2) not null default 0,
@@ -261,7 +261,7 @@ create table invoices (
   id uuid primary key default uuid_generate_v4(),
   invoice_number text not null unique,
   sale_id uuid references sales(id),
-  point_of_sale_id uuid references points_of_sale(id),
+  point_of_sale_id uuid references points_of_sale(id) on delete set null,
   issued_by uuid not null references profiles(id),
   status invoice_status not null default 'draft',
   subtotal numeric(12,2) not null default 0,
@@ -723,16 +723,16 @@ create policy reception_items_read on reception_items for select
 create policy reception_items_write on reception_items for insert
   with check (current_user_role() in ('admin','almacenero'));
 
--- PUNTOS DE VENTA: admin/almacenero/comercial gestionan
+-- PUNTOS DE VENTA: solo admin y comercial gestionan (el almacenero solo entrega a conductores)
 create policy pos_read on points_of_sale for select
-  using (current_user_role() in ('admin','almacenero','comercial'));
+  using (current_user_role() in ('admin','comercial'));
 create policy pos_write on points_of_sale for all
   using (current_user_role() in ('admin','comercial'));
 
 create policy pos_stock_read on pos_stock for select
-  using (current_user_role() in ('admin','almacenero','comercial'));
+  using (current_user_role() in ('admin','comercial'));
 create policy pos_stock_write on pos_stock for all
-  using (current_user_role() in ('admin','almacenero','comercial'));
+  using (current_user_role() in ('admin','comercial'));
 
 -- STOCK DE CONDUCTOR: el propio conductor ve el suyo; admin/almacenero ven todos
 create policy driver_stock_read on driver_stock for select
