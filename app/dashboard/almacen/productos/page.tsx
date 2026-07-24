@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@/lib/supabaseClient';
+import ConfirmModal from '@/components/ConfirmModal';
+import toast from 'react-hot-toast';
 import type { ProductModel } from '@/types/domain';
 
 interface Row extends ProductModel {
@@ -14,19 +16,89 @@ export default function ProductosPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState<Row | null>(null);
+  const [toDelete, setToDelete] = useState<Row | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [brand, setBrand] = useState('');
+  const [modelName, setModelName] = useState('');
+  const [amperage, setAmperage] = useState('');
+  const [cca, setCca] = useState('');
+  const [tech, setTech] = useState<'normal' | 'agm' | 'efb'>('normal');
+  const [isSpecial, setIsSpecial] = useState(false);
+  const [specialReason, setSpecialReason] = useState('');
+  const [minStock, setMinStock] = useState('5');
+
+  async function load() {
+    setLoading(true);
+    const { data } = await supabase
+      .from('product_models')
+      .select('*, product_ean_codes(ean_code), warehouse_stock(quantity)')
+      .eq('active', true)
+      .order('brand');
+    setRows((data as any) ?? []);
+    setLoading(false);
+  }
 
   useEffect(() => {
-    async function load() {
-      const { data } = await supabase
-        .from('product_models')
-        .select('*, product_ean_codes(ean_code), warehouse_stock(quantity)')
-        .eq('active', true)
-        .order('brand');
-      setRows((data as any) ?? []);
-      setLoading(false);
-    }
     load();
-  }, [supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function startEdit(r: Row) {
+    setEditing(r);
+    setBrand(r.brand);
+    setModelName(r.model_name);
+    setAmperage(r.amperage_ah?.toString() ?? '');
+    setCca(r.cold_cranking_amps?.toString() ?? '');
+    setTech(r.battery_tech ?? 'normal');
+    setIsSpecial(r.is_special);
+    setSpecialReason(r.special_reason ?? '');
+    setMinStock(r.min_stock_alert?.toString() ?? '5');
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    setSubmitting(true);
+    const res = await fetch(`/api/product-models/${editing.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand,
+        model_name: modelName,
+        amperage_ah: amperage ? Number(amperage) : null,
+        cold_cranking_amps: cca ? Number(cca) : null,
+        battery_tech: tech,
+        is_special: isSpecial,
+        special_reason: isSpecial ? specialReason : null,
+        min_stock_alert: Number(minStock) || 5,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al guardar los cambios.');
+      return;
+    }
+    toast.success('Modelo actualizado.');
+    setEditing(null);
+    load();
+  }
+
+  async function confirmDelete() {
+    if (!toDelete) return;
+    setSubmitting(true);
+    const res = await fetch(`/api/product-models/${toDelete.id}`, { method: 'DELETE' });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    setToDelete(null);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al eliminar el modelo.');
+      return;
+    }
+    toast.success(json.deactivatedInstead ? json.message : 'Modelo eliminado.');
+    load();
+  }
 
   const filtered = rows.filter((r) =>
     `${r.brand} ${r.model_name}`.toLowerCase().includes(search.toLowerCase())
@@ -36,7 +108,7 @@ export default function ProductosPage() {
     <div className="mx-auto max-w-4xl">
       <h1 className="text-2xl font-semibold text-slate-900">Modelos de producto</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Catálogo de baterías dado de alta en el sistema (se crean automáticamente al escanear un EAN nuevo en Recepción).
+        Catálogo de baterías. Se crean automáticamente al escanear un EAN nuevo en Recepción, y aquí puedes editarlas o eliminarlas.
       </p>
 
       <input
@@ -55,11 +127,12 @@ export default function ProductosPage() {
               <th className="px-4 py-3">Tecnología</th>
               <th className="px-4 py-3">EAN</th>
               <th className="px-4 py-3">Stock almacén</th>
+              <th className="px-4 py-3">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
             )}
             {filtered.map((r) => {
               const stock = r.warehouse_stock?.reduce((sum, s) => sum + s.quantity, 0) ?? 0;
@@ -85,12 +158,91 @@ export default function ProductosPage() {
                       {stock}
                     </span>
                   </td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <button className="btn-secondary" onClick={() => startEdit(r)}>Editar</button>
+                      <button className="btn-secondary text-red-600" onClick={() => setToDelete(r)}>Eliminar</button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full sm:max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-900">Editar modelo</h2>
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="label-field">Marca *</label>
+                <input className="input-field" value={brand} onChange={(e) => setBrand(e.target.value)} />
+              </div>
+              <div>
+                <label className="label-field">Modelo *</label>
+                <input className="input-field" value={modelName} onChange={(e) => setModelName(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-field">Amperaje (Ah)</label>
+                  <input type="number" className="input-field" value={amperage} onChange={(e) => setAmperage(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label-field">Arranque en frío (CCA)</label>
+                  <input type="number" className="input-field" value={cca} onChange={(e) => setCca(e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <label className="label-field">Tecnología</label>
+                <select className="input-field" value={tech} onChange={(e) => setTech(e.target.value as any)}>
+                  <option value="normal">Normal</option>
+                  <option value="agm">AGM</option>
+                  <option value="efb">EFB</option>
+                </select>
+              </div>
+              <div>
+                <label className="label-field">Aviso de stock mínimo</label>
+                <input type="number" className="input-field" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="edit-special"
+                  type="checkbox"
+                  checked={isSpecial}
+                  onChange={(e) => setIsSpecial(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                <label htmlFor="edit-special" className="text-sm text-slate-700">Es una batería especial</label>
+              </div>
+              {isSpecial && (
+                <div>
+                  <label className="label-field">Motivo</label>
+                  <input className="input-field" value={specialReason} onChange={(e) => setSpecialReason(e.target.value)} />
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button className="btn-secondary flex-1" onClick={() => setEditing(null)}>Cancelar</button>
+              <button className="btn-charge flex-1" disabled={submitting} onClick={saveEdit}>
+                {submitting ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        open={!!toDelete}
+        title="Eliminar modelo"
+        description={`Vas a eliminar ${toDelete?.brand} ${toDelete?.model_name}. Si ya tiene movimientos de stock o ventas, se desactivará en su lugar para conservar el histórico.`}
+        confirmLabel="Eliminar"
+        tone="danger"
+        loading={submitting}
+        onConfirm={confirmDelete}
+        onCancel={() => setToDelete(null)}
+      />
     </div>
   );
 }

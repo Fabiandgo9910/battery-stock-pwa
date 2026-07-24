@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats, Html5QrcodeScannerState } from 'html5-qrcode';
 
 interface BarcodeScannerProps {
   onScan: (code: string) => void;
@@ -9,24 +9,33 @@ interface BarcodeScannerProps {
 }
 
 /**
- * Escáner de código de barras/EAN.
- * - Usa la cámara del dispositivo (getUserMedia) vía html5-qrcode.
- * - También funciona con lectores físicos USB/Bluetooth que emulan teclado:
- *   estos "escriben" el código muy rápido seguido de Enter, así que además
- *   capturamos ese patrón a nivel de documento cuando el escáner de cámara
- *   está inactivo (por ejemplo, formularios con foco en un input oculto).
+ * Escáner de código de barras/EAN, optimizado para PWA:
+ *
+ * - La cámara NO se arranca sola al montar el componente: exige un toque
+ *   explícito del usuario ("Activar cámara"). Esto es clave en PWA/iOS, donde
+ *   el navegador puede bloquear o dar problemas con getUserMedia si no viene
+ *   de un gesto directo del usuario, y es la causa más habitual de que el
+ *   escáner "no funcione bien" la primera vez.
+ * - El permiso de cámara del navegador solo se pide una vez por sesión de
+ *   pantalla: tras el primer arranque, si `active` pasa a false se PAUSA
+ *   (no se destruye) el flujo de vídeo, y si vuelve a true se REANUDA sin
+ *   volver a pedir permiso ni reinicializar la cámara.
+ * - Al desmontar el componente del todo (se sale de la pantalla) sí se
+ *   libera la cámara por completo.
+ * - También funciona con lectores físicos USB/Bluetooth que emulan teclado,
+ *   sin necesidad de activar la cámara.
  */
 export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) {
-  const containerId = 'ean-scanner-viewport';
+  const containerIdRef = useRef(`ean-scanner-${Math.random().toString(36).slice(2)}`);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const busyRef = useRef(false);
+  const [phase, setPhase] = useState<'idle' | 'starting' | 'running' | 'paused' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
   const lastScanRef = useRef<{ code: string; time: number }>({ code: '', time: 0 });
 
   const handleDetected = useCallback(
     (decodedText: string) => {
       const now = Date.now();
-      // Evita lecturas duplicadas repetidas en menos de 2s
       if (lastScanRef.current.code === decodedText && now - lastScanRef.current.time < 2000) {
         return;
       }
@@ -37,81 +46,111 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
     [onScan]
   );
 
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    setStarting(true);
+  // Arranque explícito (gesto del usuario): pide permiso y abre la cámara.
+  const startCamera = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setError(null);
-
-    const scanner = new Html5Qrcode(containerId, {
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E,
-      ],
-      verbose: false,
-    });
-    scannerRef.current = scanner;
-
-    // Guardamos la promesa de arranque: en la limpieza esperamos a que
-    // resuelva (o falle) antes de intentar detener, para evitar la carrera
-    // "Cannot stop, scanner is not running" que provoca React Strict Mode
-    // al montar/desmontar el componente dos veces en desarrollo.
-    const startPromise = scanner
-      .start(
+    setPhase('starting');
+    try {
+      if (!scannerRef.current) {
+        scannerRef.current = new Html5Qrcode(containerIdRef.current, {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+          ],
+          verbose: false,
+        });
+      }
+      await scannerRef.current.start(
         { facingMode: 'environment' },
         { fps: 12, qrbox: { width: 280, height: 140 }, aspectRatio: 1.6 },
-        (decodedText) => {
-          if (!cancelled) handleDetected(decodedText);
-        },
+        (decodedText) => handleDetected(decodedText),
         () => {
-          /* errores de "no encontrado en este frame" - se ignoran, son constantes */
+          /* "no encontrado en este frame" - se ignora, es constante */
         }
-      )
-      .then(() => {
-        if (!cancelled) setStarting(false);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setStarting(false);
-          setError(
-            'No se pudo acceder a la cámara. Comprueba los permisos de cámara del navegador/dispositivo.'
-          );
-        }
-        console.error(err);
-      });
+      );
+      setPhase('running');
+    } catch (err) {
+      console.error(err);
+      setPhase('error');
+      setError(
+        'No se pudo acceder a la cámara. Comprueba los permisos de cámara del navegador/dispositivo.'
+      );
+    } finally {
+      busyRef.current = false;
+    }
+  }, [handleDetected]);
 
+  // Pausa / reanuda automáticamente según `active`, SIN volver a pedir
+  // permiso ni reinicializar el vídeo (solo si ya se arrancó antes).
+  useEffect(() => {
+    if (busyRef.current) return;
+    const scanner = scannerRef.current;
+    if (!scanner) return;
+
+    let state: number;
+    try {
+      state = scanner.getState();
+    } catch {
+      return;
+    }
+
+    async function toggle() {
+      busyRef.current = true;
+      try {
+        if (active && state === Html5QrcodeScannerState.PAUSED) {
+          scanner!.resume();
+          setPhase('running');
+        } else if (!active && state === Html5QrcodeScannerState.SCANNING) {
+          scanner!.pause(true);
+          setPhase('paused');
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        busyRef.current = false;
+      }
+    }
+    toggle();
+  }, [active]);
+
+  // Al desmontar del todo (se abandona la pantalla), liberamos la cámara.
+  useEffect(() => {
     return () => {
-      cancelled = true;
-      // Esperamos a que start() termine (con éxito o error) antes de parar,
-      // y solo llamamos a stop()/clear() si el escáner realmente sigue activo.
-      startPromise.finally(() => {
-        const s = scannerRef.current;
-        if (!s) return;
-        if (s.isScanning) {
+      const s = scannerRef.current;
+      if (!s) return;
+      try {
+        const state = s.getState();
+        if (state === Html5QrcodeScannerState.SCANNING || state === Html5QrcodeScannerState.PAUSED) {
           s.stop()
             .then(() => s.clear())
             .catch(() => {
               try {
                 s.clear();
               } catch {
-                /* ignorar: el nodo del DOM ya pudo haberse desmontado */
+                /* el nodo del DOM ya pudo haberse desmontado */
               }
             });
         } else {
           try {
             s.clear();
           } catch {
-            /* ignorar */
+            /* noop */
           }
         }
-      });
+      } catch {
+        /* noop */
+      }
+      scannerRef.current = null;
     };
-  }, [active, handleDetected]);
+  }, []);
 
-  // Soporte para lectores físicos (emulan teclado): capturan input global rápido + Enter
+  // Soporte para lectores físicos (emulan teclado): capturan input global
+  // rápido + Enter. Solo mientras esta pantalla quiere escanear.
   useEffect(() => {
     if (!active) return;
     let buffer = '';
@@ -119,7 +158,7 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
 
     function onKeyDown(e: KeyboardEvent) {
       const now = Date.now();
-      if (now - lastKeyTime > 100) buffer = ''; // reinicia si hay pausa (tecleo humano lento)
+      if (now - lastKeyTime > 100) buffer = '';
       lastKeyTime = now;
 
       if (e.key === 'Enter') {
@@ -134,20 +173,39 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [active, handleDetected]);
 
-  if (!active) return null;
+  if (!active && phase === 'idle') return null;
 
   return (
     <div className="w-full">
-      <div
-        id={containerId}
-        className="w-full overflow-hidden rounded-2xl border-2 border-charge-400 bg-slate-950 aspect-[4/3]"
-      />
-      {starting && (
-        <p className="mt-2 text-center text-sm text-slate-500">Iniciando cámara…</p>
-      )}
-      {error && (
-        <p className="mt-2 text-center text-sm text-red-600">{error}</p>
-      )}
+      <div className="relative w-full overflow-hidden rounded-2xl border-2 border-charge-400 bg-slate-950 aspect-[4/3]">
+        <div id={containerIdRef.current} className="h-full w-full" />
+
+        {phase !== 'running' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950/90 px-6 text-center">
+            {phase === 'starting' ? (
+              <p className="text-sm text-slate-300">Iniciando cámara…</p>
+            ) : phase === 'paused' ? (
+              <p className="text-sm text-slate-300">Cámara en pausa</p>
+            ) : (
+              <>
+                <span className="text-4xl">📷</span>
+                <button
+                  type="button"
+                  onClick={startCamera}
+                  className="rounded-xl bg-charge-400 px-5 py-2.5 text-sm font-semibold text-slate-900 hover:bg-charge-500"
+                >
+                  {phase === 'error' ? 'Reintentar' : 'Activar cámara'}
+                </button>
+                <p className="max-w-[220px] text-xs text-slate-400">
+                  El navegador te pedirá permiso de cámara la primera vez.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {error && <p className="mt-2 text-center text-sm text-red-600">{error}</p>}
       <p className="mt-2 text-center text-xs text-slate-400">
         Apunta al código EAN, o usa tu lector físico de códigos de barras.
       </p>

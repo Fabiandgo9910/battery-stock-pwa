@@ -6,7 +6,7 @@ import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
 // El admin siempre tiene acceso a todo.
 const ROLE_ROUTES: Record<string, string[]> = {
   admin: ['*'],
-  almacenero: ['/dashboard', '/dashboard/almacen'],
+  almacenero: ['/dashboard', '/dashboard/almacen', '/dashboard/comercial'],
   conductor: ['/dashboard', '/dashboard/conductor'],
   comercial: ['/dashboard', '/dashboard/comercial', '/dashboard/pos'],
 };

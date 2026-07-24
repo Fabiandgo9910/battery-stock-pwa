@@ -13,7 +13,6 @@ export default function EntregaConductorPage() {
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [driverId, setDriverId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
-  const [scannerActive, setScannerActive] = useState(true);
   const [ean, setEan] = useState('');
   const [model, setModel] = useState<ProductModel | null>(null);
   const [availableStock, setAvailableStock] = useState<number | null>(null);
@@ -33,7 +32,6 @@ export default function EntregaConductorPage() {
 
   async function handleScan(code: string) {
     setEan(code);
-    setScannerActive(false);
     const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
     const json = await res.json();
     if (!json.found) {
@@ -56,7 +54,6 @@ export default function EntregaConductorPage() {
     setModel(null);
     setAvailableStock(null);
     setQuantity(1);
-    setScannerActive(true);
   }
 
   async function submit() {
@@ -100,11 +97,11 @@ export default function EntregaConductorPage() {
           ))}
         </select>
 
-        {!model && (
+        <div className={model ? 'hidden' : ''}>
           <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
-            <BarcodeScanner active={scannerActive} onScan={handleScan} />
+            <BarcodeScanner active={!model} onScan={handleScan} />
           </ErrorBoundary>
-        )}
+        </div>
 
         {model && (
           <>

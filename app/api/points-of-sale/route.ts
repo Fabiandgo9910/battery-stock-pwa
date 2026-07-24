@@ -12,22 +12,29 @@ const schema = z.object({
   notes: z.string().optional(),
 });
 
-async function requireCommercialOrAdmin(supabase: ReturnType<typeof createRouteClient>) {
+async function requireAuth(supabase: ReturnType<typeof createRouteClient>) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return { error: NextResponse.json({ error: 'No autenticado' }, { status: 401 }) };
-
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
-  if (!profile || !['admin', 'comercial'].includes(profile.role)) {
-    return { error: NextResponse.json({ error: 'No autorizado' }, { status: 403 }) };
-  }
   return { session };
 }
 
-// GET /api/points-of-sale -> lista con su stock por modelo (admin/comercial)
+async function requireCommercialOrAdmin(supabase: ReturnType<typeof createRouteClient>) {
+  const guard = await requireAuth(supabase);
+  if (guard.error) return guard;
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', guard.session!.user.id).single();
+  if (!profile || !['admin', 'comercial'].includes(profile.role)) {
+    return { error: NextResponse.json({ error: 'No autorizado' }, { status: 403 }) };
+  }
+  return guard;
+}
+
+// GET /api/points-of-sale -> lista con su stock por modelo.
+// Lectura permitida a admin, comercial y almacenero (para poder vender);
+// la gestión (crear/editar/eliminar) queda solo para admin/comercial.
 export async function GET() {
   try {
     const supabase = createRouteClient();
-    const guard = await requireCommercialOrAdmin(supabase);
+    const guard = await requireAuth(supabase);
     if (guard.error) return guard.error;
 
     const { data, error } = await supabase
@@ -39,11 +46,11 @@ export async function GET() {
     return NextResponse.json({ points_of_sale: data });
   } catch (err) {
     console.error('GET /api/points-of-sale', err);
-    return NextResponse.json({ error: 'Error inesperado al listar puntos de venta' }, { status: 500 });
+    return NextResponse.json({ error: 'Error inesperado al listar ventas comerciales' }, { status: 500 });
   }
 }
 
-// POST /api/points-of-sale -> crea punto de venta / cliente (admin/comercial)
+// POST /api/points-of-sale -> crea cliente de venta comercial (admin/comercial)
 export async function POST(req: NextRequest) {
   try {
     const supabase = createRouteClient();
@@ -65,6 +72,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ point_of_sale: data });
   } catch (err) {
     console.error('POST /api/points-of-sale', err);
-    return NextResponse.json({ error: 'Error inesperado al crear el punto de venta' }, { status: 500 });
+    return NextResponse.json({ error: 'Error inesperado al crear la venta comercial' }, { status: 500 });
   }
 }

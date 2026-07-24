@@ -40,6 +40,11 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
 2. Cuando esté listo, ve a **SQL Editor** → pega el contenido completo de
    `supabase/schema.sql` → **Run**. Esto crea todas las tablas, roles, RLS,
    triggers de auditoría y funciones de negocio.
+   - Si vienes de una instalación anterior (ya tenías el proyecto funcionando
+     antes de esta versión), en vez del paso anterior ejecuta en orden los
+     archivos `supabase/migration_002_role_restrictions.sql` y
+     `supabase/migration_003_permission_updates.sql` — actualizan permisos y
+     claves foráneas sin borrar ningún dato.
 3. Ve a **Project Settings → API** y copia:
    - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
    - `anon public key` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`

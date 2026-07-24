@@ -13,7 +13,6 @@ type Step = 'scanning' | 'existing' | 'new-model' | 'confirm';
 export default function RecepcionPage() {
   const supabase = createBrowserClient();
   const [step, setStep] = useState<Step>('scanning');
-  const [scannerActive, setScannerActive] = useState(true);
   const [ean, setEan] = useState('');
   const [foundModel, setFoundModel] = useState<ProductModel | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -45,7 +44,6 @@ export default function RecepcionPage() {
 
   async function handleScan(code: string) {
     setEan(code);
-    setScannerActive(false);
     const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
     const json = await res.json();
     if (json.found) {
@@ -59,7 +57,6 @@ export default function RecepcionPage() {
 
   function resetFlow() {
     setStep('scanning');
-    setScannerActive(true);
     setEan('');
     setFoundModel(null);
     setQuantity(1);
@@ -140,27 +137,25 @@ export default function RecepcionPage() {
         Escanea el código EAN del palet o unidad para dar entrada al almacén.
       </p>
 
-      {step === 'scanning' && (
-        <div className="card mt-6">
-          <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
-            <BarcodeScanner active={scannerActive} onScan={handleScan} />
-          </ErrorBoundary>
-          <div className="mt-4">
-            <label className="label-field">O introduce el código manualmente</label>
-            <div className="flex gap-2">
-              <input
-                className="input-field"
-                value={ean}
-                onChange={(e) => setEan(e.target.value)}
-                placeholder="Código EAN"
-              />
-              <button className="btn-secondary" onClick={() => ean && handleScan(ean)}>
-                Buscar
-              </button>
-            </div>
+      <div className={`card mt-6 ${step === 'scanning' ? '' : 'hidden'}`}>
+        <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
+          <BarcodeScanner active={step === 'scanning'} onScan={handleScan} />
+        </ErrorBoundary>
+        <div className="mt-4">
+          <label className="label-field">O introduce el código manualmente</label>
+          <div className="flex gap-2">
+            <input
+              className="input-field"
+              value={ean}
+              onChange={(e) => setEan(e.target.value)}
+              placeholder="Código EAN"
+            />
+            <button className="btn-secondary" onClick={() => ean && handleScan(ean)}>
+              Buscar
+            </button>
           </div>
         </div>
-      )}
+      </div>
 
       {step === 'new-model' && (
         <div className="card mt-6">

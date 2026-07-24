@@ -12,7 +12,6 @@ import type { ProductModel } from '@/types/domain';
 export default function VenderPage() {
   const supabase = createBrowserClient();
   const { profile } = useProfile();
-  const [scannerActive, setScannerActive] = useState(true);
   const [ean, setEan] = useState('');
   const [model, setModel] = useState<ProductModel | null>(null);
   const [myStock, setMyStock] = useState<number | null>(null);
@@ -38,7 +37,6 @@ export default function VenderPage() {
 
   async function handleScan(code: string) {
     setEan(code);
-    setScannerActive(false);
     const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
     const json = await res.json();
     if (!json.found) {
@@ -56,7 +54,6 @@ export default function VenderPage() {
     setQuantity(1);
     setAmountCash('');
     setAmountCard('');
-    setScannerActive(true);
   }
 
   const total = (Number(amountCash) || 0) + (Number(amountCard) || 0);
@@ -101,11 +98,11 @@ export default function VenderPage() {
       </p>
 
       <div className="card mt-6">
-        {!model && (
+        <div className={model ? 'hidden' : ''}>
           <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
-            <BarcodeScanner active={scannerActive} onScan={handleScan} />
+            <BarcodeScanner active={!model} onScan={handleScan} />
           </ErrorBoundary>
-        )}
+        </div>
 
         {model && (
           <>

@@ -21,11 +21,11 @@ const TABLE_LABEL: Record<string, string> = {
   product_models: 'un modelo de producto',
   warehouse_stock: 'stock de almacén',
   driver_stock: 'stock de un conductor',
-  pos_stock: 'stock de un punto de venta',
+  pos_stock: 'stock de una venta comercial',
   sales: 'una venta',
   driver_wallets: 'una caja de conductor',
   invoices: 'una factura',
-  points_of_sale: 'un punto de venta',
+  points_of_sale: 'una venta comercial',
   profiles: 'un usuario',
 };
 

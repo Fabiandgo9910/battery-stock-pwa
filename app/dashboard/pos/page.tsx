@@ -81,10 +81,10 @@ export default function PosPage() {
     const json = await res.json().catch(() => ({}));
     setSubmitting(false);
     if (!res.ok) {
-      toast.error(json.error || 'Error al guardar el punto de venta.');
+      toast.error(json.error || 'Error al guardar la venta comercial.');
       return;
     }
-    toast.success(editingId ? 'Punto de venta actualizado.' : 'Punto de venta creado.');
+    toast.success(editingId ? 'Venta comercial actualizada.' : 'Venta comercial creada.');
     resetForm();
     load();
   }
@@ -97,10 +97,10 @@ export default function PosPage() {
     setSubmitting(false);
     setToDelete(null);
     if (!res.ok) {
-      toast.error(json.error || 'Error al eliminar el punto de venta.');
+      toast.error(json.error || 'Error al eliminar la venta comercial.');
       return;
     }
-    toast.success(json.deactivatedInstead ? json.message : 'Punto de venta eliminado.');
+    toast.success(json.deactivatedInstead ? json.message : 'Venta comercial eliminada.');
     load();
   }
 
@@ -108,7 +108,7 @@ export default function PosPage() {
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Puntos de venta</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">Ventas comerciales</h1>
           <p className="mt-1 text-sm text-slate-500">
             Empresas o talleres a los que el comercial vende directamente desde almacén.
           </p>
@@ -143,7 +143,7 @@ export default function PosPage() {
             </div>
           </div>
           <button type="submit" disabled={submitting} className="btn-charge w-full">
-            {submitting ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear punto de venta'}
+            {submitting ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear venta comercial'}
           </button>
         </form>
       )}
@@ -180,7 +180,7 @@ export default function PosPage() {
 
       <ConfirmModal
         open={!!toDelete}
-        title="Eliminar punto de venta"
+        title="Eliminar venta comercial"
         description={`Vas a eliminar ${toDelete?.name}. Si tiene ventas o facturas asociadas, se desactivará en su lugar para no perder el histórico.`}
         confirmLabel="Eliminar"
         tone="danger"

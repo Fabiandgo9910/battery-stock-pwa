@@ -68,7 +68,7 @@ export default function VentaComercialPage() {
 
   async function submitSale() {
     if (!posId) {
-      toast.error('Selecciona el punto de venta / cliente.');
+      toast.error('Selecciona el venta comercial / cliente.');
       return;
     }
     setSubmitting(true);

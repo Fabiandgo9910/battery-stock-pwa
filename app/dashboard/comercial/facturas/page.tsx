@@ -110,7 +110,7 @@ export default function FacturasPage() {
       </div>
 
       {editing && (
-        <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-slate-950/60 p-4">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
           <div className="w-full sm:max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[85vh] overflow-y-auto">
             <h2 className="text-lg font-semibold text-slate-900">{editing.invoice_number}</h2>
             <div className="mt-4 space-y-3">

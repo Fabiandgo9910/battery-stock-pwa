@@ -16,8 +16,10 @@ export default function UsuariosPage() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingUser, setEditingUser] = useState<Profile | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [toDeactivate, setToDeactivate] = useState<Profile | null>(null);
+  const [toDelete, setToDelete] = useState<Profile | null>(null);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -48,11 +50,48 @@ export default function UsuariosPage() {
     setVehiclePlate('');
     setZone('');
     setShowForm(false);
+    setEditingUser(null);
   }
 
-  async function createUser(e: React.FormEvent) {
+  function startEdit(u: Profile) {
+    setEditingUser(u);
+    setFullName(u.full_name);
+    setEmail(u.email);
+    setRole(u.role);
+    setPhone(u.phone ?? '');
+    setVehiclePlate(u.vehicle_plate ?? '');
+    setZone(u.zone ?? '');
+    setShowForm(true);
+  }
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+
+    if (editingUser) {
+      const res = await fetch(`/api/users/${editingUser.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: fullName,
+          role,
+          phone: phone || undefined,
+          vehicle_plate: role === 'conductor' ? vehiclePlate || undefined : undefined,
+          zone: role === 'conductor' ? zone || undefined : undefined,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      setSubmitting(false);
+      if (!res.ok) {
+        toast.error(json.error || 'Error al editar usuario');
+        return;
+      }
+      toast.success('Usuario actualizado correctamente.');
+      resetForm();
+      load();
+      return;
+    }
+
     const res = await fetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -66,10 +105,10 @@ export default function UsuariosPage() {
         zone: zone || undefined,
       }),
     });
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
     setSubmitting(false);
     if (!res.ok) {
-      toast.error(json.error?.formErrors?.[0] || json.error || 'Error al crear usuario');
+      toast.error(json.error || 'Error al crear usuario');
       return;
     }
     toast.success('Usuario creado correctamente.');
@@ -83,6 +122,7 @@ export default function UsuariosPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: true }),
     });
+    toast.success('Usuario reactivado.');
     load();
   }
 
@@ -94,6 +134,21 @@ export default function UsuariosPage() {
     load();
   }
 
+  async function confirmDelete() {
+    if (!toDelete) return;
+    setSubmitting(true);
+    const res = await fetch(`/api/users/${toDelete.id}?permanent=true`, { method: 'DELETE' });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    setToDelete(null);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al eliminar el usuario.');
+      return;
+    }
+    toast.success(json.deleted ? 'Usuario eliminado permanentemente.' : json.message);
+    load();
+  }
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center justify-between">
@@ -101,13 +156,18 @@ export default function UsuariosPage() {
           <h1 className="text-2xl font-semibold text-slate-900">Usuarios</h1>
           <p className="mt-1 text-sm text-slate-500">Gestiona conductores, almaceneros, comerciales y administradores.</p>
         </div>
-        <button className="btn-charge" onClick={() => setShowForm(!showForm)}>
+        <button className="btn-charge" onClick={() => (showForm ? resetForm() : setShowForm(true))}>
           {showForm ? 'Cerrar' : '+ Nuevo usuario'}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={createUser} className="card mt-6 space-y-4">
+        <form onSubmit={submit} className="card mt-6 space-y-4">
+          {editingUser && (
+            <p className="rounded-xl bg-charge-50 px-4 py-2 text-sm text-charge-700">
+              Editando a <strong>{editingUser.full_name}</strong>. El correo no se puede cambiar aquí.
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label-field">Nombre completo *</label>
@@ -123,12 +183,21 @@ export default function UsuariosPage() {
             </div>
             <div>
               <label className="label-field">Correo electrónico *</label>
-              <input required type="email" className="input-field" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input
+                required
+                type="email"
+                disabled={!!editingUser}
+                className="input-field disabled:bg-slate-100 disabled:text-slate-400"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
-            <div>
-              <label className="label-field">Contraseña provisional *</label>
-              <input required type="password" minLength={6} className="input-field" value={password} onChange={(e) => setPassword(e.target.value)} />
-            </div>
+            {!editingUser && (
+              <div>
+                <label className="label-field">Contraseña provisional *</label>
+                <input required type="password" minLength={6} className="input-field" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </div>
+            )}
             <div>
               <label className="label-field">Teléfono</label>
               <input className="input-field" value={phone} onChange={(e) => setPhone(e.target.value)} />
@@ -147,7 +216,7 @@ export default function UsuariosPage() {
             )}
           </div>
           <button type="submit" disabled={submitting} className="btn-charge w-full">
-            {submitting ? 'Creando…' : 'Crear usuario'}
+            {submitting ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Crear usuario'}
           </button>
         </form>
       )}
@@ -163,15 +232,15 @@ export default function UsuariosPage() {
               <p className="text-sm text-slate-500">{u.email} · {ROLE_LABEL[u.role]}</p>
               {u.vehicle_plate && <p className="text-xs text-slate-400">Vehículo: {u.vehicle_plate} {u.zone ? `· Zona: ${u.zone}` : ''}</p>}
             </div>
-            {u.active ? (
-              <button className="btn-secondary text-red-600" onClick={() => setToDeactivate(u)}>
-                Desactivar
-              </button>
-            ) : (
-              <button className="btn-secondary" onClick={() => toggleActive(u)}>
-                Reactivar
-              </button>
-            )}
+            <div className="flex flex-wrap gap-2">
+              <button className="btn-secondary" onClick={() => startEdit(u)}>Editar</button>
+              {u.active ? (
+                <button className="btn-secondary" onClick={() => setToDeactivate(u)}>Desactivar</button>
+              ) : (
+                <button className="btn-secondary" onClick={() => toggleActive(u)}>Reactivar</button>
+              )}
+              <button className="btn-secondary text-red-600" onClick={() => setToDelete(u)}>Eliminar</button>
+            </div>
           </div>
         ))}
       </div>
@@ -184,6 +253,17 @@ export default function UsuariosPage() {
         tone="danger"
         onConfirm={confirmDeactivate}
         onCancel={() => setToDeactivate(null)}
+      />
+
+      <ConfirmModal
+        open={!!toDelete}
+        title="Eliminar usuario permanentemente"
+        description={`Esta acción borra a ${toDelete?.full_name} del sistema de acceso. Si tiene ventas, entregas o recepciones registradas, no se podrá borrar del todo y se desactivará en su lugar para no perder el histórico.`}
+        confirmLabel="Eliminar"
+        tone="danger"
+        loading={submitting}
+        onConfirm={confirmDelete}
+        onCancel={() => setToDelete(null)}
       />
     </div>
   );

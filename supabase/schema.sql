@@ -674,9 +674,10 @@ alter table invoice_items enable row level security;
 alter table stock_movements enable row level security;
 alter table audit_log enable row level security;
 
--- PROFILES: cada uno ve el suyo, admin ve todos
+-- PROFILES: cada uno ve el suyo; admin y almacenero ven todos (el almacenero
+-- necesita ver la lista de conductores para poder entregarles stock)
 create policy profiles_select on profiles for select
-  using (id = auth.uid() or current_user_role() = 'admin');
+  using (id = auth.uid() or current_user_role() in ('admin','almacenero'));
 create policy profiles_update_self on profiles for update
   using (id = auth.uid() or current_user_role() = 'admin');
 create policy profiles_admin_all on profiles for all
@@ -693,7 +694,7 @@ create policy product_models_write on product_models for insert
 create policy product_models_update on product_models for update
   using (current_user_role() in ('admin','almacenero'));
 create policy product_models_delete on product_models for delete
-  using (current_user_role() = 'admin');
+  using (current_user_role() in ('admin','almacenero'));
 
 create policy ean_codes_read on product_ean_codes for select using (auth.uid() is not null);
 create policy ean_codes_write on product_ean_codes for insert
@@ -723,14 +724,16 @@ create policy reception_items_read on reception_items for select
 create policy reception_items_write on reception_items for insert
   with check (current_user_role() in ('admin','almacenero'));
 
--- PUNTOS DE VENTA: solo admin y comercial gestionan (el almacenero solo entrega a conductores)
+-- PUNTOS DE VENTA (venta comercial): almacenero y comercial pueden LEER (para
+-- poder elegir el cliente al vender), pero solo admin/comercial pueden
+-- crear/editar/eliminar clientes.
 create policy pos_read on points_of_sale for select
-  using (current_user_role() in ('admin','comercial'));
+  using (current_user_role() in ('admin','comercial','almacenero'));
 create policy pos_write on points_of_sale for all
   using (current_user_role() in ('admin','comercial'));
 
 create policy pos_stock_read on pos_stock for select
-  using (current_user_role() in ('admin','comercial'));
+  using (current_user_role() in ('admin','comercial','almacenero'));
 create policy pos_stock_write on pos_stock for all
   using (current_user_role() in ('admin','comercial'));
 
