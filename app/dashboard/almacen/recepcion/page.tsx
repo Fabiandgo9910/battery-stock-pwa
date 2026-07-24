@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
@@ -141,7 +142,9 @@ export default function RecepcionPage() {
 
       {step === 'scanning' && (
         <div className="card mt-6">
-          <BarcodeScanner active={scannerActive} onScan={handleScan} />
+          <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
+            <BarcodeScanner active={scannerActive} onScan={handleScan} />
+          </ErrorBoundary>
           <div className="mt-4">
             <label className="label-field">O introduce el código manualmente</label>
             <div className="flex gap-2">

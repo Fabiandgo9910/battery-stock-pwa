@@ -55,7 +55,11 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
     });
     scannerRef.current = scanner;
 
-    scanner
+    // Guardamos la promesa de arranque: en la limpieza esperamos a que
+    // resuelva (o falle) antes de intentar detener, para evitar la carrera
+    // "Cannot stop, scanner is not running" que provoca React Strict Mode
+    // al montar/desmontar el componente dos veces en desarrollo.
+    const startPromise = scanner
       .start(
         { facingMode: 'environment' },
         { fps: 12, qrbox: { width: 280, height: 140 }, aspectRatio: 1.6 },
@@ -66,23 +70,44 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
           /* errores de "no encontrado en este frame" - se ignoran, son constantes */
         }
       )
-      .then(() => setStarting(false))
+      .then(() => {
+        if (!cancelled) setStarting(false);
+      })
       .catch((err) => {
-        setStarting(false);
-        setError(
-          'No se pudo acceder a la cámara. Comprueba los permisos de cámara del navegador/dispositivo.'
-        );
+        if (!cancelled) {
+          setStarting(false);
+          setError(
+            'No se pudo acceder a la cámara. Comprueba los permisos de cámara del navegador/dispositivo.'
+          );
+        }
         console.error(err);
       });
 
     return () => {
       cancelled = true;
-      if (scannerRef.current) {
-        scannerRef.current
-          .stop()
-          .then(() => scannerRef.current?.clear())
-          .catch(() => {});
-      }
+      // Esperamos a que start() termine (con éxito o error) antes de parar,
+      // y solo llamamos a stop()/clear() si el escáner realmente sigue activo.
+      startPromise.finally(() => {
+        const s = scannerRef.current;
+        if (!s) return;
+        if (s.isScanning) {
+          s.stop()
+            .then(() => s.clear())
+            .catch(() => {
+              try {
+                s.clear();
+              } catch {
+                /* ignorar: el nodo del DOM ya pudo haberse desmontado */
+              }
+            });
+        } else {
+          try {
+            s.clear();
+          } catch {
+            /* ignorar */
+          }
+        }
+      });
     };
   }, [active, handleDetected]);
 

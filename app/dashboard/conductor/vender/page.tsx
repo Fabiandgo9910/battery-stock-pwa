@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
@@ -98,7 +99,11 @@ export default function VenderPage() {
       <p className="mt-1 text-sm text-slate-500">Escanea la batería que vas a vender al cliente.</p>
 
       <div className="card mt-6">
-        {!model && <BarcodeScanner active={scannerActive} onScan={handleScan} />}
+        {!model && (
+          <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
+            <BarcodeScanner active={scannerActive} onScan={handleScan} />
+          </ErrorBoundary>
+        )}
 
         {model && (
           <>
