@@ -142,10 +142,10 @@ export default function UsuariosPage() {
     setSubmitting(false);
     setToDelete(null);
     if (!res.ok) {
-      toast.error(json.error || 'Error al eliminar el usuario.');
+      toast.error(json.error || 'Error al eliminar el usuario.', json.reason === 'stock' ? { duration: 7000 } : undefined);
       return;
     }
-    toast.success(json.deleted ? 'Usuario eliminado permanentemente.' : json.message);
+    toast.success('Usuario eliminado permanentemente.');
     load();
   }
 
@@ -258,7 +258,7 @@ export default function UsuariosPage() {
       <ConfirmModal
         open={!!toDelete}
         title="Eliminar usuario permanentemente"
-        description={`Esta acción borra a ${toDelete?.full_name} del sistema de acceso. Si tiene ventas, entregas o recepciones registradas, no se podrá borrar del todo y se desactivará en su lugar para no perder el histórico.`}
+        description={`Esta acción borra a ${toDelete?.full_name} del sistema por completo (no queda ningún rastro). Solo se bloqueará si todavía tiene stock de baterías asignado — en ese caso te lo avisará y tendrás que retirárselo primero.`}
         confirmLabel="Eliminar"
         tone="danger"
         loading={submitting}

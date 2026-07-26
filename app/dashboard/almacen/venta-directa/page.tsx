@@ -6,17 +6,16 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
-import { useProfile } from '@/hooks/useProfile';
 import type { ProductModel } from '@/types/domain';
 
 type SaleOrigin = 'particular' | 'web' | 'mapfre';
 
-export default function VenderPage() {
+export default function VentaDirectaAlmacenPage() {
   const supabase = createBrowserClient();
-  const { profile } = useProfile();
+  const [warehouseId, setWarehouseId] = useState('');
   const [ean, setEan] = useState('');
   const [model, setModel] = useState<ProductModel | null>(null);
-  const [myStock, setMyStock] = useState<number | null>(null);
+  const [availableStock, setAvailableStock] = useState<number | null>(null);
   const [looking, setLooking] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [amountCash, setAmountCash] = useState('');
@@ -29,18 +28,12 @@ export default function VenderPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    async function checkStock() {
-      if (!model || !profile) return;
-      const { data } = await supabase
-        .from('driver_stock')
-        .select('quantity')
-        .eq('driver_id', profile.id)
-        .eq('product_model_id', model.id)
-        .maybeSingle();
-      setMyStock(data?.quantity ?? 0);
+    async function load() {
+      const { data: wh } = await supabase.from('warehouses').select('*').eq('active', true).eq('is_warranty_holding', false).limit(1).single();
+      if (wh) setWarehouseId(wh.id);
     }
-    checkStock();
-  }, [model, profile, supabase]);
+    load();
+  }, [supabase]);
 
   async function handleScan(code: string) {
     setLooking(true);
@@ -54,6 +47,13 @@ export default function VenderPage() {
         return;
       }
       setModel(json.product_model);
+      const { data: stock } = await supabase
+        .from('warehouse_stock')
+        .select('quantity')
+        .eq('warehouse_id', warehouseId)
+        .eq('product_model_id', json.product_model.id)
+        .maybeSingle();
+      setAvailableStock(stock?.quantity ?? 0);
     } finally {
       setLooking(false);
     }
@@ -62,7 +62,7 @@ export default function VenderPage() {
   function reset() {
     setEan('');
     setModel(null);
-    setMyStock(null);
+    setAvailableStock(null);
     setQuantity(1);
     setAmountCash('');
     setAmountCard('');
@@ -79,8 +79,8 @@ export default function VenderPage() {
       toast.error('Introduce el importe cobrado.');
       return;
     }
-    if (myStock !== null && quantity > myStock) {
-      toast.error('No tienes suficiente stock para esta venta.');
+    if (availableStock !== null && quantity > availableStock) {
+      toast.error('No hay suficiente stock en almacén para esta venta.');
       return;
     }
     if (!vehiclePlate.trim()) {
@@ -92,10 +92,11 @@ export default function VenderPage() {
       return;
     }
     setSubmitting(true);
-    const res = await fetch('/api/driver-sale', {
+    const res = await fetch('/api/warehouse-sale', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        warehouse_id: warehouseId,
         product_model_id: model!.id,
         ean_code: ean,
         quantity,
@@ -114,15 +115,16 @@ export default function VenderPage() {
       toast.error(json.error || 'Error al registrar la venta');
       return;
     }
-    toast.success('Venta registrada. Se ha actualizado tu caja.');
+    toast.success('Venta registrada directamente desde el almacén.');
     reset();
   }
 
   return (
     <div className="mx-auto max-w-lg">
-      <h1 className="text-2xl font-semibold text-slate-900">Vender batería</h1>
+      <h1 className="text-2xl font-semibold text-slate-900">Venta directa de almacén</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Venta a un cliente particular, desde el stock que llevas en tu furgoneta (el que te entregó el almacén).
+        Venta a un cliente particular desde el stock del almacén central. No tiene relación con la
+        venta comercial (esa es para empresas/talleres por transferencia con factura).
       </p>
 
       <div className="card mt-6">
@@ -137,11 +139,7 @@ export default function VenderPage() {
           <>
             <div className="rounded-xl bg-slate-50 p-4">
               <p className="font-semibold text-slate-900">{model.brand} {model.model_name}</p>
-              <p className="text-sm text-slate-500">
-                {model.amperage_ah ? `${model.amperage_ah} Ah` : ''}
-                {model.battery_tech ? ` · ${model.battery_tech.toUpperCase()}` : ''}
-              </p>
-              <p className="mt-1 text-sm text-slate-500">Tienes en tu furgoneta: <strong>{myStock ?? '…'}</strong></p>
+              <p className="text-sm text-slate-500">Disponible en almacén: <strong>{availableStock}</strong></p>
             </div>
 
             <div className="mt-4">
@@ -149,7 +147,7 @@ export default function VenderPage() {
               <input
                 type="number"
                 min={1}
-                max={myStock ?? undefined}
+                max={availableStock ?? undefined}
                 className="input-field text-lg font-semibold"
                 value={quantity}
                 onChange={(e) => setQuantity(Number(e.target.value))}
@@ -183,7 +181,7 @@ export default function VenderPage() {
             <div className="mt-4">
               <label className="label-field">Origen de la venta</label>
               <select className="input-field" value={saleOrigin} onChange={(e) => setSaleOrigin(e.target.value as SaleOrigin)}>
-                <option value="particular">Particular (en la calle)</option>
+                <option value="particular">Particular</option>
                 <option value="web">Web</option>
                 <option value="mapfre">Mapfre</option>
               </select>
@@ -191,7 +189,7 @@ export default function VenderPage() {
 
             <div className="mt-4 flex items-center gap-2 rounded-xl border border-charge-200 bg-charge-50 px-4 py-3">
               <input
-                id="is-warranty"
+                id="is-warranty-wh"
                 type="checkbox"
                 checked={isWarranty}
                 onChange={(e) => {
@@ -203,7 +201,7 @@ export default function VenderPage() {
                 }}
                 className="h-4 w-4 rounded border-slate-300"
               />
-              <label htmlFor="is-warranty" className="text-sm text-charge-800">
+              <label htmlFor="is-warranty-wh" className="text-sm text-charge-800">
                 Es una garantía (0 € salvo que el cliente pague la diferencia por subir de gama)
               </label>
             </div>
@@ -240,9 +238,6 @@ export default function VenderPage() {
                 {isWarranty ? 'Total cobrado (diferencia)' : 'Total cobrado'}
               </p>
               <p className="text-2xl font-bold text-slate-900">{total.toFixed(2)} €</p>
-              {isWarranty && total === 0 && (
-                <p className="mt-1 text-xs text-charge-700">Garantía sin coste para el cliente</p>
-              )}
             </div>
 
             <div className="mt-6 flex gap-3">
@@ -257,8 +252,8 @@ export default function VenderPage() {
 
       <ConfirmModal
         open={confirmOpen}
-        title="Confirmar venta"
-        description={`${quantity} x ${model?.brand} ${model?.model_name} — ${isWarranty ? `garantía, ${total.toFixed(2)} € de diferencia` : `total ${total.toFixed(2)} €`}. Matrícula: ${vehiclePlate.toUpperCase()}.`}
+        title="Confirmar venta directa"
+        description={`${quantity} x ${model?.brand} ${model?.model_name} — ${isWarranty ? `garantía, ${total.toFixed(2)} € de diferencia` : `total ${total.toFixed(2)} €`}.`}
         confirmLabel="Confirmar"
         loading={submitting}
         onConfirm={submit}

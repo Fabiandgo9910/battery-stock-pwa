@@ -6,7 +6,11 @@ import toast from 'react-hot-toast';
 
 interface StockRow {
   quantity: number;
-  product_model: { brand: string; model_name: string } | null;
+  product_model: {
+    brand: string;
+    model_name: string;
+    product_ean_codes?: { ean_code: string }[];
+  } | null;
 }
 interface DriverRow {
   driver: { id: string; full_name: string; vehicle_plate: string | null; zone: string | null; active: boolean };
@@ -19,6 +23,8 @@ export default function BilleterasAdminPage() {
   const [target, setTarget] = useState<DriverRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [searchDriver, setSearchDriver] = useState('');
+  const [searchBattery, setSearchBattery] = useState('');
 
   async function load() {
     setLoading(true);
@@ -58,9 +64,36 @@ export default function BilleterasAdminPage() {
         cuando el conductor te haya entregado el dinero recaudado.
       </p>
 
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <input
+          className="input-field"
+          placeholder="Buscar por conductor…"
+          value={searchDriver}
+          onChange={(e) => setSearchDriver(e.target.value)}
+        />
+        <input
+          className="input-field"
+          placeholder="Buscar por batería (marca/modelo/EAN)… muestra quién la lleva"
+          value={searchBattery}
+          onChange={(e) => setSearchBattery(e.target.value)}
+        />
+      </div>
+
       <div className="mt-6 space-y-4">
         {loading && <p className="text-sm text-slate-400">Cargando…</p>}
-        {rows.map((r) => {
+        {rows
+          .filter((r) => r.driver.full_name.toLowerCase().includes(searchDriver.toLowerCase()))
+          .filter((r) => {
+            if (!searchBattery.trim()) return true;
+            const q = searchBattery.toLowerCase();
+            return r.stock.some((s) => {
+              const text = `${s.product_model?.brand ?? ''} ${s.product_model?.model_name ?? ''} ${(s.product_model?.product_ean_codes ?? [])
+                .map((e) => e.ean_code)
+                .join(' ')}`.toLowerCase();
+              return text.includes(q);
+            });
+          })
+          .map((r) => {
           const total = r.wallet.cash_balance + r.wallet.card_balance;
           return (
             <div key={r.driver.id} className="card">
@@ -113,6 +146,9 @@ export default function BilleterasAdminPage() {
                     {r.stock.map((s, i) => (
                       <span key={i} className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
                         {s.product_model?.brand} {s.product_model?.model_name}: <strong>{s.quantity}</strong>
+                        {s.product_model?.product_ean_codes?.[0] && (
+                          <span className="text-slate-400"> · {s.product_model.product_ean_codes[0].ean_code}</span>
+                        )}
                       </span>
                     ))}
                   </div>

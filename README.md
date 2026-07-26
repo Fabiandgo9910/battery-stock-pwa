@@ -16,9 +16,11 @@ battery-stock-pwa/
 │   ├── login/                 ← Autenticación
 │   ├── dashboard/             ← Todas las pantallas (por rol)
 │   └── api/                   ← Capa de API separada (Route Handlers), organizada
-│                                 por módulo: reception, dispatch-driver, driver-sale,
-│                                 commercial-sale, wallet-reset, product-models,
-│                                 users, points-of-sale, suppliers, invoices, audit
+│                                 por módulo: reception, driver-orders, driver-sale,
+│                                 warehouse-sale, returns, commercial-sale,
+│                                 wallet-reset, product-models, users,
+│                                 points-of-sale, suppliers, invoices,
+│                                 admin/driver-overview, admin/daily-sales
 ├── components/                ← BarcodeScanner, ConfirmModal (UI reutilizable)
 ├── hooks/useProfile.ts        ← Hook de sesión/rol del usuario
 ├── lib/                       ← Clientes de Supabase (browser/server/route handler)
@@ -38,13 +40,20 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
 
 1. Ve a [supabase.com](https://supabase.com) → **New Project**.
 2. Cuando esté listo, ve a **SQL Editor** → pega el contenido completo de
-   `supabase/schema.sql` → **Run**. Esto crea todas las tablas, roles, RLS,
-   triggers de auditoría y funciones de negocio.
-   - Si vienes de una instalación anterior (ya tenías el proyecto funcionando
-     antes de esta versión), en vez del paso anterior ejecuta en orden los
-     archivos `supabase/migration_002_role_restrictions.sql` y
-     `supabase/migration_003_permission_updates.sql` — actualizan permisos y
-     claves foráneas sin borrar ningún dato.
+   `supabase/schema.sql` → **Run**. Esto crea todas las tablas, roles, RLS
+   y funciones de negocio (instalación nueva, desde cero).
+   - Si vienes de una instalación anterior (ya tenías el proyecto
+     funcionando antes de esta versión), en vez del paso anterior ejecuta
+     **en este orden exacto** en el SQL Editor:
+     1. `supabase/migration_002_role_restrictions.sql`
+     2. `supabase/migration_003_permission_updates.sql`
+     3. `supabase/migration_004_major_update.sql`
+     Ninguna borra datos de negocio. La migración 004 es la más importante:
+     elimina por completo el antiguo sistema de auditoría (tabla, funciones
+     y triggers, sin dejar rastro), añade pedidos a conductor con
+     aceptación/rechazo, devoluciones (simples y de garantía), venta directa
+     de almacén, y los campos nuevos de venta (matrícula, batería vieja,
+     origen, garantía).
 3. Ve a **Project Settings → API** y copia:
    - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
    - `anon public key` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -133,40 +142,71 @@ También puedes desplegarlo en cualquier hosting compatible con Next.js
 ## 8. Flujo de uso por rol
 
 ### Administrador
-Acceso total. Da de alta usuarios (`Usuarios`), reinicia cajas de
-conductores (`Cajas de conductores`), y consulta la trazabilidad completa
-(`Auditoría`).
+Acceso total a todo lo de abajo, más:
+- **Usuarios**: crear, editar, desactivar/reactivar y **eliminar de verdad**.
+  El borrado físico se bloquea automáticamente (con un mensaje explícito) si
+  el usuario todavía tiene stock de baterías asignado — hay que retirárselo
+  primero (entregarlo a otro conductor o hacer una devolución al almacén).
+  Sin stock pendiente, se elimina sin dejar rastro.
+- **Cajas de conductores**: caja (efectivo/tarjeta) y stock de cada
+  conductor en la misma pantalla, con buscador por conductor y por batería
+  (marca/modelo/EAN, para ver quién la lleva). Reinicio de caja individual.
+- **Ventas del día**: resumen por conductor/vendedor, con unidades y dinero
+  separado por efectivo y tarjeta, y cuántas ventas fueron con cada método.
+  Por defecto muestra hasta el momento actual (no hay que esperar a que
+  acabe el día); se puede elegir cualquier día anterior.
 
 ### Almacenero
 - **Recepción**: escanea el EAN del palet. Si no existe, rellena marca,
   modelo, amperaje, arranque en frío (CCA), tecnología (normal/AGM/EFB), si
-  es especial y motivo. Luego indica la empresa distribuidora, quién
-  recepciona (automático, el usuario logueado) y la cantidad → se suma al
-  stock del almacén.
-- **Entregar a conductor**: escanea, selecciona el conductor, indica
-  cantidad → resta del almacén y suma al conductor, con fecha y quién hizo
-  la entrega.
-- **Modelos de producto** / **Distribuidores**: catálogos de consulta y alta.
+  es especial y motivo. Luego indica la empresa distribuidora y la cantidad
+  → se suma al stock del almacén.
+- **Entregar a conductor**: arma un pedido escaneando una o varias
+  baterías (con las cantidades que quiera) y lo envía a un conductor. El
+  stock del almacén **no se descuenta todavía** — el conductor tiene que
+  aceptar el pedido desde su móvil para que se mueva el stock (o rechazarlo,
+  y entonces no se mueve nada).
+- **Venta directa de almacén**: vende a un cliente particular directamente
+  desde el stock del almacén central (no tiene nada que ver con la venta
+  comercial). Funciona igual que la venta de un conductor: matrícula del
+  coche, si se lleva la batería vieja, origen (particular/web/Mapfre), y
+  opción de marcarla como garantía.
+- **Devoluciones**: registra devoluciones simples (vuelven al stock
+  vendible) o de garantía (van a un almacén de garantías aparte, sin
+  mezclarse con lo que se puede vender). Puede venir de un conductor
+  (se le resta de su stock) o directamente de un cliente/taller.
+- **Modelos de producto**: catálogo de baterías, con edición y eliminación
+  (si el modelo ya tiene movimientos, se desactiva en vez de borrarse, para
+  no perder el histórico).
+- **Distribuidores**: alta, edición y eliminación de empresas suministradoras.
+- También puede hacer **venta comercial** (ver más abajo).
 
 ### Conductor / Vendedor
-- **Vender**: escanea la batería, indica cuánto cobra en efectivo y/o
-  tarjeta → resta de su stock y suma a su caja (separada por efectivo y
-  tarjeta).
+- **Pedidos**: los pedidos que le prepara el almacén aparecen aquí
+  pendientes de respuesta. Al aceptar, las baterías pasan a su stock; al
+  rechazar, no se mueve nada.
+- **Vender**: escanea la batería y cobra en efectivo y/o tarjeta. Pide
+  también la matrícula del coche del cliente y si entrega la batería vieja.
+  Puede marcar la venta como **garantía**: en ese caso el cobro es 0 €,
+  salvo que el cliente suba de gama, en cuyo caso solo se cobra (en
+  efectivo o tarjeta) la diferencia.
 - **Mi stock**: qué lleva y cuánto.
-- **Mi caja**: saldo actual y movimientos. Solo un administrador puede
-  reiniciarla a cero (queda registrado quién y cuándo).
+- **Mi caja**: saldo actual (efectivo y tarjeta por separado) y
+  movimientos. Solo un administrador puede reiniciarla a cero.
 
-### Comercial
-- **Venta comercial**: escanea todos los productos de la venta, selecciona
-  el punto de venta/cliente → se genera una factura en **borrador con los
-  precios en blanco**.
+### Comercial (y también admin/almacenero)
+- **Venta comercial**: escanea todos los productos de la venta a una
+  empresa o taller → se genera una factura en **borrador con los precios en
+  blanco**. Es un canal totalmente distinto a la venta directa de almacén:
+  esta es siempre por transferencia y con factura.
 - **Facturas**: rellena el precio de cada línea y emite la factura (se
   calculan automáticamente subtotal, IVA y total).
-- También gestiona **Puntos de venta**.
+- **Ventas comerciales** (gestión de clientes): alta, edición y baja de las
+  empresas/talleres a los que se les puede vender.
 
 ---
 
-## 9. Seguridad y trazabilidad
+## 9. Seguridad
 
 - Autenticación con Supabase Auth (email + contraseña).
 - **Row Level Security** en todas las tablas: cada rol solo ve/edita lo que
@@ -174,14 +214,19 @@ conductores (`Cajas de conductores`), y consulta la trazabilidad completa
   ni el stock del almacén central).
 - **`middleware.ts`** bloquea además el acceso a rutas de la interfaz que no
   correspondan al rol del usuario.
-- **`audit_log`**: cada INSERT/UPDATE/DELETE en las tablas sensibles
-  (productos, stock, ventas, facturas, cajas, usuarios, puntos de venta)
-  queda registrado con usuario, fecha, y el estado anterior/nuevo del
-  registro. Visible en el panel de Auditoría.
-- Las operaciones críticas (recepción, entrega, venta, reinicio de caja) se
-  ejecutan como **funciones SQL transaccionales** (`fn_*` en `schema.sql`),
-  no como varias llamadas sueltas desde el frontend — así el stock nunca
-  queda a medias si algo falla a mitad de camino.
+- **No existe ningún sistema de auditoría ni registro de "quién hizo qué"
+  a nivel de usuario.** La única traza que queda es la operativa de negocio
+  en sí (recepciones, pedidos, ventas, devoluciones, movimientos de stock),
+  necesaria para que las cantidades cuadren — no hay tabla ni log que
+  registre acciones de los usuarios más allá de eso.
+- Las operaciones críticas (recepción, pedidos a conductor, venta, reinicio
+  de caja, devoluciones) se ejecutan como **funciones SQL transaccionales**
+  (`fn_*` en `schema.sql`), no como varias llamadas sueltas desde el
+  frontend — así el stock nunca queda a medias si algo falla a mitad de
+  camino.
+- **Eliminar usuarios**: el borrado físico (no la simple desactivación) se
+  bloquea automáticamente si el usuario tiene stock de baterías asignado,
+  con un mensaje explícito indicando qué stock hay que retirar antes.
 
 ---
 

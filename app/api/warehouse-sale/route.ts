@@ -3,6 +3,7 @@ import { createRouteClient } from '@/lib/supabaseServer';
 import { z } from 'zod';
 
 const bodySchema = z.object({
+  warehouse_id: z.string().uuid(),
   product_model_id: z.string().uuid(),
   ean_code: z.string().optional(),
   quantity: z.number().int().positive(),
@@ -15,13 +16,21 @@ const bodySchema = z.object({
   notes: z.string().optional(),
 });
 
-// POST /api/driver-sale -> venta unitaria de un conductor (resta su stock, suma su billetera).
-// Admite venta de garantía (0€, o solo la diferencia si el cliente sube de gama).
+// POST /api/warehouse-sale -> venta directa del almacenero/admin desde el
+// almacén central. Funciona igual que una venta de conductor (misma lógica
+// de garantía, efectivo/tarjeta, matrícula, batería vieja, origen), pero no
+// tiene nada que ver con la venta comercial (esa es para empresas/talleres
+// por transferencia y con factura).
 export async function POST(req: NextRequest) {
   try {
     const supabase = createRouteClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+    if (!profile || !['admin', 'almacenero'].includes(profile.role)) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
 
     const parsed = bodySchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {
@@ -29,8 +38,9 @@ export async function POST(req: NextRequest) {
     }
     const body = parsed.data;
 
-    const { data, error } = await supabase.rpc('fn_driver_sale', {
-      p_driver_id: session.user.id,
+    const { data, error } = await supabase.rpc('fn_warehouse_sale', {
+      p_seller_id: session.user.id,
+      p_warehouse_id: body.warehouse_id,
       p_product_model_id: body.product_model_id,
       p_ean_code: body.ean_code ?? null,
       p_quantity: body.quantity,
@@ -46,7 +56,7 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ sale_id: data });
   } catch (err) {
-    console.error('POST /api/driver-sale', err);
+    console.error('POST /api/warehouse-sale', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Error inesperado al registrar la venta' },
       { status: 500 }

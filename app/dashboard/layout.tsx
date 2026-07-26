@@ -20,6 +20,9 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard/almacen/entrega-conductor', label: 'Entregar a conductor', roles: ['admin', 'almacenero'], icon: '🚚' },
   { href: '/dashboard/almacen/productos', label: 'Modelos de producto', roles: ['admin', 'almacenero'], icon: '🔋' },
   { href: '/dashboard/almacen/distribuidores', label: 'Distribuidores', roles: ['admin', 'almacenero'], icon: '🏭' },
+  { href: '/dashboard/almacen/venta-directa', label: 'Venta directa almacén', roles: ['admin', 'almacenero'], icon: '💶' },
+  { href: '/dashboard/almacen/devoluciones', label: 'Devoluciones', roles: ['admin', 'almacenero'], icon: '↩️' },
+  { href: '/dashboard/conductor/pedidos', label: 'Pedidos', roles: ['conductor'], icon: '📋' },
   { href: '/dashboard/conductor/vender', label: 'Vender', roles: ['conductor'], icon: '💳' },
   { href: '/dashboard/conductor/mi-stock', label: 'Mi stock', roles: ['conductor'], icon: '📦' },
   { href: '/dashboard/conductor/billetera', label: 'Mi caja', roles: ['conductor'], icon: '👛' },
@@ -29,7 +32,6 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard/usuarios', label: 'Usuarios', roles: ['admin'], icon: '👥' },
   { href: '/dashboard/admin/billeteras', label: 'Cajas de conductores', roles: ['admin'], icon: '💰' },
   { href: '/dashboard/admin/ventas-diarias', label: 'Ventas del día', roles: ['admin'], icon: '📊' },
-  { href: '/dashboard/admin/auditoria', label: 'Auditoría', roles: ['admin'], icon: '🔍' },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
