@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import type { ProductModel, Profile } from '@/types/domain';
@@ -33,6 +35,13 @@ export default function DevolucionesPage() {
   const [notes, setNotes] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const {
+    page: returnsPage,
+    setPage: setReturnsPage,
+    pageItems: returnsPageItems,
+    total: returnsTotal,
+  } = usePagination(returns, 10);
 
   async function loadReturns() {
     setLoadingList(true);
@@ -210,7 +219,7 @@ export default function DevolucionesPage() {
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-slate-500">Últimas devoluciones</h2>
       <div className="mt-3 space-y-2">
         {loadingList && <p className="text-sm text-slate-400">Cargando…</p>}
-        {returns.map((r) => (
+        {returnsPageItems.map((r) => (
           <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm">
             <div>
               <p className="font-medium text-slate-800">
@@ -229,6 +238,8 @@ export default function DevolucionesPage() {
         ))}
         {!loadingList && returns.length === 0 && <p className="text-sm text-slate-400">Sin devoluciones todavía.</p>}
       </div>
+
+      <Pagination page={returnsPage} pageSize={10} total={returnsTotal} onPageChange={setReturnsPage} />
 
       <ConfirmModal
         open={confirmOpen}

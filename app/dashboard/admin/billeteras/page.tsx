@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
 
 interface StockRow {
+  product_model_id: string;
   quantity: number;
   product_model: {
     brand: string;
@@ -25,6 +28,10 @@ export default function BilleterasAdminPage() {
   const [submitting, setSubmitting] = useState(false);
   const [searchDriver, setSearchDriver] = useState('');
   const [searchBattery, setSearchBattery] = useState('');
+
+  const [reclaimTarget, setReclaimTarget] = useState<{ driver: DriverRow['driver']; stock: StockRow } | null>(null);
+  const [reclaimQty, setReclaimQty] = useState(1);
+  const [reclaimConfirmOpen, setReclaimConfirmOpen] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -56,12 +63,57 @@ export default function BilleterasAdminPage() {
     load();
   }
 
+  function openReclaim(driver: DriverRow['driver'], stock: StockRow) {
+    setReclaimTarget({ driver, stock });
+    setReclaimQty(1);
+  }
+
+  async function confirmReclaim() {
+    if (!reclaimTarget) return;
+    setSubmitting(true);
+    const res = await fetch('/api/admin/reclaim-driver-stock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        driver_id: reclaimTarget.driver.id,
+        product_model_id: reclaimTarget.stock.product_model_id,
+        quantity: reclaimQty,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    setReclaimConfirmOpen(false);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al retirar el stock.');
+      return;
+    }
+    toast.success('Stock retirado y devuelto al almacén.');
+    setReclaimTarget(null);
+    load();
+  }
+
+  const filtered = rows
+    .filter((r) => r.driver.full_name.toLowerCase().includes(searchDriver.toLowerCase()))
+    .filter((r) => {
+      if (!searchBattery.trim()) return true;
+      const q = searchBattery.toLowerCase();
+      return r.stock.some((s) => {
+        const text = `${s.product_model?.brand ?? ''} ${s.product_model?.model_name ?? ''} ${(s.product_model?.product_ean_codes ?? [])
+          .map((e) => e.ean_code)
+          .join(' ')}`.toLowerCase();
+        return text.includes(q);
+      });
+    });
+
+  const { page, setPage, pageItems, total } = usePagination(filtered, 10);
+
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="text-2xl font-semibold text-slate-900">Conductores: caja y stock</h1>
       <p className="mt-1 text-sm text-slate-500">
         Consulta lo que lleva cada conductor y su caja acumulada. Reinicia la caja individualmente
-        cuando el conductor te haya entregado el dinero recaudado.
+        cuando el conductor te haya entregado el dinero recaudado, o retírale stock si es necesario
+        (vuelve al almacén central).
       </p>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -81,20 +133,8 @@ export default function BilleterasAdminPage() {
 
       <div className="mt-6 space-y-4">
         {loading && <p className="text-sm text-slate-400">Cargando…</p>}
-        {rows
-          .filter((r) => r.driver.full_name.toLowerCase().includes(searchDriver.toLowerCase()))
-          .filter((r) => {
-            if (!searchBattery.trim()) return true;
-            const q = searchBattery.toLowerCase();
-            return r.stock.some((s) => {
-              const text = `${s.product_model?.brand ?? ''} ${s.product_model?.model_name ?? ''} ${(s.product_model?.product_ean_codes ?? [])
-                .map((e) => e.ean_code)
-                .join(' ')}`.toLowerCase();
-              return text.includes(q);
-            });
-          })
-          .map((r) => {
-          const total = r.wallet.cash_balance + r.wallet.card_balance;
+        {pageItems.map((r) => {
+          const totalWallet = r.wallet.cash_balance + r.wallet.card_balance;
           return (
             <div key={r.driver.id} className="card">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -111,7 +151,7 @@ export default function BilleterasAdminPage() {
                     </p>
                   )}
                 </div>
-                <button className="btn-secondary" onClick={() => setTarget(r)} disabled={total === 0}>
+                <button className="btn-secondary" onClick={() => setTarget(r)} disabled={totalWallet === 0}>
                   Reiniciar caja
                 </button>
               </div>
@@ -127,7 +167,7 @@ export default function BilleterasAdminPage() {
                 </div>
                 <div className="rounded-xl bg-charge-50 py-2">
                   <p className="text-[11px] uppercase text-charge-700">Total</p>
-                  <p className="font-semibold text-charge-700">{total.toFixed(2)} €</p>
+                  <p className="font-semibold text-charge-700">{totalWallet.toFixed(2)} €</p>
                 </div>
               </div>
 
@@ -144,12 +184,18 @@ export default function BilleterasAdminPage() {
                 ) : (
                   <div className="mt-1.5 flex flex-wrap gap-2">
                     {r.stock.map((s, i) => (
-                      <span key={i} className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
+                      <button
+                        key={i}
+                        onClick={() => openReclaim(r.driver, s)}
+                        className="group flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs text-slate-700 hover:bg-red-50 hover:text-red-700"
+                        title="Retirar este stock y devolverlo al almacén"
+                      >
                         {s.product_model?.brand} {s.product_model?.model_name}: <strong>{s.quantity}</strong>
                         {s.product_model?.product_ean_codes?.[0] && (
-                          <span className="text-slate-400"> · {s.product_model.product_ean_codes[0].ean_code}</span>
+                          <span className="text-slate-400 group-hover:text-red-400"> · {s.product_model.product_ean_codes[0].ean_code}</span>
                         )}
-                      </span>
+                        <span className="text-slate-300 group-hover:text-red-400">✕</span>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -160,7 +206,12 @@ export default function BilleterasAdminPage() {
         {!loading && rows.length === 0 && (
           <div className="card text-center text-slate-400">Todavía no hay conductores dados de alta.</div>
         )}
+        {!loading && rows.length > 0 && filtered.length === 0 && (
+          <div className="card text-center text-slate-400">Ningún conductor coincide con la búsqueda.</div>
+        )}
       </div>
+
+      <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
 
       <ConfirmModal
         open={!!target}
@@ -171,6 +222,49 @@ export default function BilleterasAdminPage() {
         loading={submitting}
         onConfirm={confirmReset}
         onCancel={() => setTarget(null)}
+      />
+
+      {reclaimTarget && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full sm:max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-900">Retirar stock</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {reclaimTarget.stock.product_model?.brand} {reclaimTarget.stock.product_model?.model_name} — de{' '}
+              {reclaimTarget.driver.full_name}
+            </p>
+            <div className="mt-4">
+              <label className="label-field">Cantidad a retirar (disponible: {reclaimTarget.stock.quantity})</label>
+              <input
+                type="number"
+                min={1}
+                max={reclaimTarget.stock.quantity}
+                className="input-field text-lg font-semibold"
+                value={reclaimQty}
+                onChange={(e) => setReclaimQty(Number(e.target.value))}
+              />
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button className="btn-secondary flex-1" onClick={() => setReclaimTarget(null)}>Cancelar</button>
+              <button
+                className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 flex-1"
+                onClick={() => setReclaimConfirmOpen(true)}
+              >
+                Retirar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        open={reclaimConfirmOpen}
+        title="Confirmar retirada de stock"
+        description={`Vas a quitarle ${reclaimQty} unidad(es) de ${reclaimTarget?.stock.product_model?.brand} ${reclaimTarget?.stock.product_model?.model_name} a ${reclaimTarget?.driver.full_name} y devolverlas al almacén central.`}
+        confirmLabel="Sí, retirar"
+        tone="danger"
+        loading={submitting}
+        onConfirm={confirmReclaim}
+        onCancel={() => setReclaimConfirmOpen(false)}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import toast from 'react-hot-toast';
@@ -12,19 +12,51 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Si el middleware nos rebotó aquí por cuenta desactivada, avisamos.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('reason') === 'inactive') {
+      toast.error('Tu cuenta está desactivada. Contacta con el administrador.', { duration: 6000 });
+      window.history.replaceState({}, '', '/login');
+    }
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
 
-    if (error) {
-      toast.error('Credenciales incorrectas o usuario inactivo.');
+    if (!error) {
+      setLoading(false);
+      toast.success('Bienvenido');
+      router.push('/dashboard');
+      router.refresh();
       return;
     }
-    toast.success('Bienvenido');
-    router.push('/dashboard');
-    router.refresh();
+
+    // Login falló: averiguamos el motivo exacto (no existe / desactivado /
+    // contraseña incorrecta) para dar un mensaje preciso en vez del genérico.
+    try {
+      const res = await fetch('/api/auth/login-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const json = await res.json();
+      if (json.status === 'not_found') {
+        toast.error('No existe ninguna cuenta con ese correo.');
+      } else if (json.status === 'inactive') {
+        toast.error('Tu cuenta está desactivada. Contacta con el administrador.');
+      } else if (json.status === 'wrong_password') {
+        toast.error('Contraseña incorrecta.');
+      } else {
+        toast.error('No se pudo iniciar sesión. Inténtalo de nuevo.');
+      }
+    } catch {
+      toast.error('Credenciales incorrectas o usuario inactivo.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

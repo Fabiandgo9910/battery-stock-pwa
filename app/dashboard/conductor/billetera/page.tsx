@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import { useProfile } from '@/hooks/useProfile';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import type { DriverWallet } from '@/types/domain';
 
 interface TxRow {
@@ -29,13 +31,14 @@ export default function BilleteraPage() {
         .select('*')
         .eq('driver_id', profile.id)
         .order('created_at', { ascending: false })
-        .limit(30);
+        .limit(200);
       setTxs(t ?? []);
     }
     load();
   }, [profile, supabase]);
 
   const total = (wallet?.cash_balance ?? 0) + (wallet?.card_balance ?? 0);
+  const { page, setPage, pageItems, total: totalTx } = usePagination(txs, 15);
 
   return (
     <div className="mx-auto max-w-lg">
@@ -66,7 +69,7 @@ export default function BilleteraPage() {
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-slate-500">Movimientos recientes</h2>
       <div className="mt-3 space-y-2">
-        {txs.map((tx) => (
+        {pageItems.map((tx) => (
           <div key={tx.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm">
             <div>
               <p className="font-medium text-slate-800">
@@ -81,6 +84,8 @@ export default function BilleteraPage() {
         ))}
         {txs.length === 0 && <p className="text-sm text-slate-400">Sin movimientos todavía.</p>}
       </div>
+
+      <Pagination page={page} pageSize={15} total={totalTx} onPageChange={setPage} />
     </div>
   );
 }

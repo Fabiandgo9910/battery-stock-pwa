@@ -26,7 +26,7 @@ export async function GET() {
 
     const { data: stock, error: stockErr } = await supabase
       .from('driver_stock')
-      .select('driver_id, quantity, product_model:product_models(brand, model_name, product_ean_codes(ean_code))')
+      .select('driver_id, product_model_id, quantity, product_model:product_models(brand, model_name, product_ean_codes(ean_code))')
       .gt('quantity', 0);
     if (stockErr) return NextResponse.json({ error: stockErr.message }, { status: 500 });
 

@@ -41,7 +41,9 @@ export async function middleware(req: NextRequest) {
 
     if (!profile || !profile.active) {
       await supabase.auth.signOut();
-      return NextResponse.redirect(new URL('/login', req.url));
+      const url = new URL('/login', req.url);
+      url.searchParams.set('reason', 'inactive');
+      return NextResponse.redirect(url);
     }
 
     const allowed = ROLE_ROUTES[profile.role] ?? [];

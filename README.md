@@ -41,19 +41,28 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
 1. Ve a [supabase.com](https://supabase.com) → **New Project**.
 2. Cuando esté listo, ve a **SQL Editor** → pega el contenido completo de
    `supabase/schema.sql` → **Run**. Esto crea todas las tablas, roles, RLS
-   y funciones de negocio (instalación nueva, desde cero).
+   y funciones de negocio (instalación nueva, desde cero, ya incluye todo).
    - Si vienes de una instalación anterior (ya tenías el proyecto
      funcionando antes de esta versión), en vez del paso anterior ejecuta
-     **en este orden exacto** en el SQL Editor:
+     **en este orden exacto, cada archivo como su propia pulsación de "Run"**
+     (no los pegues todos juntos):
      1. `supabase/migration_002_role_restrictions.sql`
      2. `supabase/migration_003_permission_updates.sql`
-     3. `supabase/migration_004_major_update.sql`
-     Ninguna borra datos de negocio. La migración 004 es la más importante:
-     elimina por completo el antiguo sistema de auditoría (tabla, funciones
-     y triggers, sin dejar rastro), añade pedidos a conductor con
+     3. `supabase/migration_004a_enum_values.sql` ⚠️ **ejecuta este solo, espera a que termine, y comprueba su verificación antes de seguir**
+     4. `supabase/migration_004b_major_update.sql`
+     5. `supabase/migration_005_stock_reclaim_and_notifications.sql`
+
+     Ninguna borra datos de negocio. Los pasos 3 y 4 tienen que ir
+     **separados** a propósito: `ALTER TYPE ... ADD VALUE` (paso 3) no puede
+     usarse en la misma transacción en la que luego se usa ese valor nuevo
+     (paso 4) — si los pegas juntos en una sola ejecución, Postgres lo
+     rechaza y la migración queda a medias (esto es lo que causaba que las
+     devoluciones no funcionasen). El 004b añade pedidos a conductor con
      aceptación/rechazo, devoluciones (simples y de garantía), venta directa
      de almacén, y los campos nuevos de venta (matrícula, batería vieja,
-     origen, garantía).
+     origen, garantía). El 005 añade que el admin pueda retirar stock a un
+     conductor y devolverlo al almacén, y el aviso de "pedido rechazado"
+     para almacén/admin.
 3. Ve a **Project Settings → API** y copia:
    - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
    - `anon public key` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -151,6 +160,14 @@ Acceso total a todo lo de abajo, más:
 - **Cajas de conductores**: caja (efectivo/tarjeta) y stock de cada
   conductor en la misma pantalla, con buscador por conductor y por batería
   (marca/modelo/EAN, para ver quién la lleva). Reinicio de caja individual.
+  También puedes **retirarle stock a un conductor** directamente desde
+  aquí (tocando la batería en cuestión): vuelve al almacén central.
+- **Pedidos pendientes**: ve el estado de todos los pedidos que el
+  almacenero (o tú mismo) le habéis preparado a cada conductor — pendientes
+  de respuesta, aceptados o rechazados, con buscador por conductor.
+- Si un conductor **rechaza** un pedido, te salta un aviso emergente (a ti
+  y al almacenero) la próxima vez que uses la app, hasta que lo marques
+  como visto.
 - **Ventas del día**: resumen por conductor/vendedor, con unidades y dinero
   separado por efectivo y tarjeta, y cuántas ventas fueron con cada método.
   Por defecto muestra hasta el momento actual (no hay que esperar a que
@@ -182,6 +199,9 @@ Acceso total a todo lo de abajo, más:
 - También puede hacer **venta comercial** (ver más abajo).
 
 ### Conductor / Vendedor
+- En cuanto tiene un pedido sin responder, le aparece un **aviso a pantalla
+  completa que no se puede cerrar** hasta que lo acepte o lo rechace (salta
+  en cualquier pantalla de la app, no hace falta que entre a "Pedidos").
 - **Pedidos**: los pedidos que le prepara el almacén aparecen aquí
   pendientes de respuesta. Al aceptar, las baterías pasan a su stock; al
   rechazar, no se mueve nada.
@@ -227,6 +247,14 @@ Acceso total a todo lo de abajo, más:
 - **Eliminar usuarios**: el borrado físico (no la simple desactivación) se
   bloquea automáticamente si el usuario tiene stock de baterías asignado,
   con un mensaje explícito indicando qué stock hay que retirar antes.
+- **Login con mensajes precisos**: si el inicio de sesión falla, la app te
+  dice si es porque no existe ninguna cuenta con ese correo, porque la
+  cuenta está desactivada, o porque la contraseña es incorrecta — en vez
+  del mensaje genérico de siempre.
+- **Todas las listas están paginadas** (usuarios, distribuidores, modelos
+  de producto, facturas, clientes, cajas, ventas del día, stock, pedidos,
+  devoluciones), con buscador donde tiene sentido, para que sigan yendo
+  rápido aunque crezcan mucho con el tiempo.
 
 ---
 

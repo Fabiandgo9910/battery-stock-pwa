@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
 
 interface InvoiceItem {
@@ -73,6 +75,12 @@ export default function FacturasPage() {
     load();
   }
 
+  const [search, setSearch] = useState('');
+  const filtered = invoices.filter((inv) =>
+    `${inv.invoice_number} ${inv.point_of_sale?.name ?? ''}`.toLowerCase().includes(search.toLowerCase())
+  );
+  const { page, setPage, pageItems, total } = usePagination(filtered, 10);
+
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="text-2xl font-semibold text-slate-900">Facturas</h1>
@@ -80,9 +88,16 @@ export default function FacturasPage() {
         Se generan en borrador con los precios en blanco. Complétalos aquí para emitirlas.
       </p>
 
-      <div className="mt-6 space-y-3">
+      <input
+        className="input-field mt-6"
+        placeholder="Buscar por número de factura o cliente…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
+      <div className="mt-4 space-y-3">
         {loading && <p className="text-sm text-slate-400">Cargando…</p>}
-        {invoices.map((inv) => (
+        {pageItems.map((inv) => (
           <div key={inv.id} className="card">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -107,7 +122,12 @@ export default function FacturasPage() {
         {!loading && invoices.length === 0 && (
           <div className="card text-center text-slate-400">Todavía no hay facturas.</div>
         )}
+        {!loading && invoices.length > 0 && filtered.length === 0 && (
+          <div className="card text-center text-slate-400">Ninguna factura coincide con la búsqueda.</div>
+        )}
       </div>
+
+      <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
 
       {editing && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">

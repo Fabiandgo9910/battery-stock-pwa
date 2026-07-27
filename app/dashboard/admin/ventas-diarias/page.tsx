@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 
 interface Row {
   seller_id: string;
@@ -61,6 +63,7 @@ export default function VentasDiariasPage() {
   }, [date, load]);
 
   const filtered = rows.filter((r) => r.seller_name.toLowerCase().includes(search.toLowerCase()));
+  const { page, setPage, pageItems, total } = usePagination(filtered, 15);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -131,7 +134,7 @@ export default function VentasDiariasPage() {
             {!loading && filtered.length === 0 && (
               <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Sin ventas para ese filtro.</td></tr>
             )}
-            {filtered.map((r) => (
+            {pageItems.map((r) => (
               <tr key={r.seller_id} className="border-t border-slate-100">
                 <td className="px-4 py-3 font-medium text-slate-900">{r.seller_name}</td>
                 <td className="px-4 py-3 text-slate-500">
@@ -146,6 +149,8 @@ export default function VentasDiariasPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} pageSize={15} total={total} onPageChange={setPage} />
     </div>
   );
 }

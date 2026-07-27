@@ -6,6 +6,8 @@ import { useProfile } from '@/hooks/useProfile';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import { useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import PendingOrderGate from '@/components/PendingOrderGate';
+import RejectedOrderAlert from '@/components/RejectedOrderAlert';
 
 interface NavItem {
   href: string;
@@ -18,6 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Inicio', roles: ['admin', 'almacenero', 'conductor', 'comercial'], icon: '🏠' },
   { href: '/dashboard/almacen/recepcion', label: 'Recepción', roles: ['admin', 'almacenero'], icon: '📥' },
   { href: '/dashboard/almacen/entrega-conductor', label: 'Entregar a conductor', roles: ['admin', 'almacenero'], icon: '🚚' },
+  { href: '/dashboard/almacen/pedidos-pendientes', label: 'Pedidos pendientes', roles: ['admin', 'almacenero'], icon: '⏳' },
   { href: '/dashboard/almacen/productos', label: 'Modelos de producto', roles: ['admin', 'almacenero'], icon: '🔋' },
   { href: '/dashboard/almacen/distribuidores', label: 'Distribuidores', roles: ['admin', 'almacenero'], icon: '🏭' },
   { href: '/dashboard/almacen/venta-directa', label: 'Venta directa almacén', roles: ['admin', 'almacenero'], icon: '💶' },
@@ -151,6 +154,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         onConfirm={doLogout}
         onCancel={() => setConfirmLogout(false)}
       />
+
+      {profile?.role === 'conductor' && <PendingOrderGate />}
+      {(profile?.role === 'admin' || profile?.role === 'almacenero') && <RejectedOrderAlert />}
     </div>
   );
 }

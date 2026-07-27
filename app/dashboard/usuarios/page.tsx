@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
 import type { Profile, UserRole } from '@/types/domain';
 
@@ -20,6 +22,7 @@ export default function UsuariosPage() {
   const [submitting, setSubmitting] = useState(false);
   const [toDeactivate, setToDeactivate] = useState<Profile | null>(null);
   const [toDelete, setToDelete] = useState<Profile | null>(null);
+  const [search, setSearch] = useState('');
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -149,6 +152,11 @@ export default function UsuariosPage() {
     load();
   }
 
+  const filteredUsers = users.filter((u) =>
+    `${u.full_name} ${u.email} ${ROLE_LABEL[u.role]}`.toLowerCase().includes(search.toLowerCase())
+  );
+  const { page, setPage, pageItems, total } = usePagination(filteredUsers, 10);
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center justify-between">
@@ -221,9 +229,16 @@ export default function UsuariosPage() {
         </form>
       )}
 
-      <div className="mt-6 space-y-3">
+      <input
+        className="input-field mt-6"
+        placeholder="Buscar por nombre, correo o rol…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
+      <div className="mt-4 space-y-3">
         {loading && <p className="text-sm text-slate-400">Cargando…</p>}
-        {users.map((u) => (
+        {pageItems.map((u) => (
           <div key={u.id} className="card flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="font-semibold text-slate-900">
@@ -243,7 +258,12 @@ export default function UsuariosPage() {
             </div>
           </div>
         ))}
+        {!loading && filteredUsers.length === 0 && (
+          <div className="card text-center text-slate-400">Ningún usuario coincide con la búsqueda.</div>
+        )}
       </div>
+
+      <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
 
       <ConfirmModal
         open={!!toDeactivate}

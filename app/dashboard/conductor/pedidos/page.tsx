@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
 
 interface OrderItem {
@@ -55,6 +57,8 @@ export default function PedidosConductorPage() {
     load();
   }
 
+  const { page, setPage, pageItems, total } = usePagination(orders, 10);
+
   return (
     <div className="mx-auto max-w-lg">
       <h1 className="text-2xl font-semibold text-slate-900">Pedidos pendientes</h1>
@@ -68,7 +72,7 @@ export default function PedidosConductorPage() {
         {!loading && orders.length === 0 && (
           <div className="card text-center text-slate-400">No tienes pedidos pendientes.</div>
         )}
-        {orders.map((order) => (
+        {pageItems.map((order) => (
           <div key={order.id} className="card">
             <p className="text-xs text-slate-400">
               Preparado por {order.delivered_by_profile?.full_name ?? 'almacén'} ·{' '}
@@ -100,6 +104,8 @@ export default function PedidosConductorPage() {
           </div>
         ))}
       </div>
+
+      <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
 
       <ConfirmModal
         open={!!confirmTarget}

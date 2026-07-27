@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
 import type { ProductModel } from '@/types/domain';
 
@@ -103,6 +105,7 @@ export default function ProductosPage() {
   const filtered = rows.filter((r) =>
     `${r.brand} ${r.model_name}`.toLowerCase().includes(search.toLowerCase())
   );
+  const { page, setPage, pageItems, total } = usePagination(filtered, 15);
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -134,7 +137,10 @@ export default function ProductosPage() {
             {loading && (
               <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
             )}
-            {filtered.map((r) => {
+            {filtered.length === 0 && !loading && (
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Sin resultados.</td></tr>
+            )}
+            {pageItems.map((r) => {
               const stock = r.warehouse_stock?.reduce((sum, s) => sum + s.quantity, 0) ?? 0;
               return (
                 <tr key={r.id} className="border-t border-slate-100">
@@ -170,6 +176,8 @@ export default function ProductosPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} pageSize={15} total={total} onPageChange={setPage} />
 
       {editing && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
