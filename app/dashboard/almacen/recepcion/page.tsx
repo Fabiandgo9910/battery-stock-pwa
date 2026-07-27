@@ -22,6 +22,7 @@ export default function RecepcionPage() {
   const [notes, setNotes] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [editingExisting, setEditingExisting] = useState(false);
 
   // Formulario de modelo nuevo
   const [brand, setBrand] = useState('');
@@ -36,7 +37,7 @@ export default function RecepcionPage() {
     async function loadBase() {
       const { data: sup } = await supabase.from('suppliers').select('*').eq('active', true).order('name');
       setSuppliers(sup ?? []);
-      const { data: wh } = await supabase.from('warehouses').select('*').eq('active', true).limit(1).single();
+      const { data: wh } = await supabase.from('warehouses').select('*').eq('active', true).eq('is_warranty_holding', false).limit(1).single();
       if (wh) setWarehouseId(wh.id);
     }
     loadBase();
@@ -68,6 +69,7 @@ export default function RecepcionPage() {
     setTech('normal');
     setIsSpecial(false);
     setSpecialReason('');
+    setEditingExisting(false);
   }
 
   async function createNewModelAndContinue() {
@@ -99,6 +101,58 @@ export default function RecepcionPage() {
     setFoundModel(json.product_model);
     setStep('existing');
     toast.success('Modelo de batería creado. Ahora indica la cantidad recibida.');
+  }
+
+  function startEditExisting() {
+    if (!foundModel) return;
+    setBrand(foundModel.brand);
+    setModelName(foundModel.model_name);
+    setAmperage(foundModel.amperage_ah?.toString() ?? '');
+    setCca(foundModel.cold_cranking_amps?.toString() ?? '');
+    setTech(foundModel.battery_tech ?? 'normal');
+    setIsSpecial(foundModel.is_special);
+    setSpecialReason(foundModel.special_reason ?? '');
+    setEditingExisting(true);
+  }
+
+  async function saveExistingEdit() {
+    if (!foundModel) return;
+    if (!brand || !modelName) {
+      toast.error('Marca y modelo son obligatorios.');
+      return;
+    }
+    setSubmitting(true);
+    const res = await fetch(`/api/product-models/${foundModel.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand,
+        model_name: modelName,
+        amperage_ah: amperage ? Number(amperage) : null,
+        cold_cranking_amps: cca ? Number(cca) : null,
+        battery_tech: tech,
+        is_special: isSpecial,
+        special_reason: isSpecial ? specialReason : null,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al guardar los cambios.');
+      return;
+    }
+    setFoundModel({
+      ...foundModel,
+      brand,
+      model_name: modelName,
+      amperage_ah: amperage ? Number(amperage) : null as any,
+      cold_cranking_amps: cca ? Number(cca) : null as any,
+      battery_tech: tech,
+      is_special: isSpecial,
+      special_reason: isSpecial ? specialReason : null,
+    });
+    setEditingExisting(false);
+    toast.success('Modelo actualizado.');
   }
 
   async function submitReception() {
@@ -217,19 +271,30 @@ export default function RecepcionPage() {
         </div>
       )}
 
-      {step === 'existing' && foundModel && (
+      {step === 'existing' && foundModel && !editingExisting && (
         <div className="card mt-6">
           <div className="rounded-xl bg-slate-50 p-4">
-            <p className="font-semibold text-slate-900">{foundModel.brand} {foundModel.model_name}</p>
-            <p className="text-sm text-slate-500">
-              {foundModel.amperage_ah ? `${foundModel.amperage_ah} Ah` : ''}
-              {foundModel.cold_cranking_amps ? ` · ${foundModel.cold_cranking_amps} CCA` : ''}
-              {foundModel.battery_tech ? ` · ${foundModel.battery_tech.toUpperCase()}` : ''}
-            </p>
-            {foundModel.is_special && (
-              <p className="mt-1 text-xs text-charge-700">Especial: {foundModel.special_reason}</p>
-            )}
-            <p className="mt-1 text-xs text-slate-400">EAN: {ean}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold text-slate-900">{foundModel.brand} {foundModel.model_name}</p>
+                <p className="text-sm text-slate-500">
+                  {foundModel.amperage_ah ? `${foundModel.amperage_ah} Ah` : ''}
+                  {foundModel.cold_cranking_amps ? ` · ${foundModel.cold_cranking_amps} CCA` : ''}
+                  {foundModel.battery_tech ? ` · ${foundModel.battery_tech.toUpperCase()}` : ''}
+                </p>
+                {foundModel.is_special && (
+                  <p className="mt-1 text-xs text-charge-700">Especial: {foundModel.special_reason}</p>
+                )}
+                <p className="mt-1 text-xs text-slate-400">EAN: {ean}</p>
+              </div>
+              <button
+                type="button"
+                onClick={startEditExisting}
+                className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-white"
+              >
+                Editar
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 space-y-4">
@@ -262,6 +327,66 @@ export default function RecepcionPage() {
             <button className="btn-secondary flex-1" onClick={resetFlow}>Cancelar</button>
             <button className="btn-charge flex-1" onClick={() => setConfirmOpen(true)}>
               Registrar entrada
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 'existing' && foundModel && editingExisting && (
+        <div className="card mt-6">
+          <p className="mb-4 rounded-xl bg-charge-50 px-4 py-2 text-sm text-charge-700">
+            Editando {foundModel.brand} {foundModel.model_name} (EAN: {ean})
+          </p>
+          <div className="space-y-4">
+            <div>
+              <label className="label-field">Marca *</label>
+              <input className="input-field" value={brand} onChange={(e) => setBrand(e.target.value)} />
+            </div>
+            <div>
+              <label className="label-field">Modelo *</label>
+              <input className="input-field" value={modelName} onChange={(e) => setModelName(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label-field">Amperaje (Ah)</label>
+                <input type="number" className="input-field" value={amperage} onChange={(e) => setAmperage(e.target.value)} />
+              </div>
+              <div>
+                <label className="label-field">Arranque en frío (CCA)</label>
+                <input type="number" className="input-field" value={cca} onChange={(e) => setCca(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label className="label-field">Tecnología</label>
+              <select className="input-field" value={tech} onChange={(e) => setTech(e.target.value as any)}>
+                <option value="normal">Normal</option>
+                <option value="agm">AGM</option>
+                <option value="efb">EFB</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="edit-existing-special"
+                type="checkbox"
+                checked={isSpecial}
+                onChange={(e) => setIsSpecial(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+              <label htmlFor="edit-existing-special" className="text-sm text-slate-700">
+                Es una batería especial
+              </label>
+            </div>
+            {isSpecial && (
+              <div>
+                <label className="label-field">Motivo</label>
+                <input className="input-field" value={specialReason} onChange={(e) => setSpecialReason(e.target.value)} />
+              </div>
+            )}
+          </div>
+          <div className="mt-6 flex gap-3">
+            <button className="btn-secondary flex-1" onClick={() => setEditingExisting(false)}>Cancelar</button>
+            <button className="btn-charge flex-1" disabled={submitting} onClick={saveExistingEdit}>
+              {submitting ? 'Guardando…' : 'Guardar cambios'}
             </button>
           </div>
         </div>

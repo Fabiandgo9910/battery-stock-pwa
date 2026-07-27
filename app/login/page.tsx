@@ -16,7 +16,7 @@ export default function LoginPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('reason') === 'inactive') {
-      toast.error('Tu cuenta está desactivada. Contacta con el administrador.', { duration: 6000 });
+      toast.error('No existe ninguna cuenta activa con ese correo: está desactivada.', { duration: 6000 });
       window.history.replaceState({}, '', '/login');
     }
   }, []);
@@ -46,7 +46,7 @@ export default function LoginPage() {
       if (json.status === 'not_found') {
         toast.error('No existe ninguna cuenta con ese correo.');
       } else if (json.status === 'inactive') {
-        toast.error('Tu cuenta está desactivada. Contacta con el administrador.');
+        toast.error('No existe ninguna cuenta activa con ese correo: está desactivada.');
       } else if (json.status === 'wrong_password') {
         toast.error('Contraseña incorrecta.');
       } else {

@@ -10,7 +10,7 @@ import type { ProductModel } from '@/types/domain';
 
 interface Row extends ProductModel {
   product_ean_codes: { ean_code: string }[];
-  warehouse_stock?: { quantity: number }[];
+  warehouse_stock?: { quantity: number; warehouse: { is_warranty_holding: boolean } | null }[];
 }
 
 export default function ProductosPage() {
@@ -35,7 +35,7 @@ export default function ProductosPage() {
     setLoading(true);
     const { data } = await supabase
       .from('product_models')
-      .select('*, product_ean_codes(ean_code), warehouse_stock(quantity)')
+      .select('*, product_ean_codes(ean_code), warehouse_stock(quantity, warehouse:warehouses(is_warranty_holding))')
       .eq('active', true)
       .order('brand');
     setRows((data as any) ?? []);
@@ -130,18 +130,24 @@ export default function ProductosPage() {
               <th className="px-4 py-3">Tecnología</th>
               <th className="px-4 py-3">EAN</th>
               <th className="px-4 py-3">Stock almacén</th>
+              <th className="px-4 py-3">Stock garantías</th>
               <th className="px-4 py-3">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
             )}
             {filtered.length === 0 && !loading && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Sin resultados.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Sin resultados.</td></tr>
             )}
             {pageItems.map((r) => {
-              const stock = r.warehouse_stock?.reduce((sum, s) => sum + s.quantity, 0) ?? 0;
+              const stock = r.warehouse_stock
+                ?.filter((s) => !s.warehouse?.is_warranty_holding)
+                .reduce((sum, s) => sum + s.quantity, 0) ?? 0;
+              const warrantyStock = r.warehouse_stock
+                ?.filter((s) => s.warehouse?.is_warranty_holding)
+                .reduce((sum, s) => sum + s.quantity, 0) ?? 0;
               return (
                 <tr key={r.id} className="border-t border-slate-100">
                   <td className="px-4 py-3">
@@ -163,6 +169,15 @@ export default function ProductosPage() {
                     }`}>
                       {stock}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {warrantyStock > 0 ? (
+                      <span className="rounded-full bg-charge-100 px-2.5 py-1 text-xs font-semibold text-charge-700">
+                        {warrantyStock}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">

@@ -51,6 +51,7 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
      3. `supabase/migration_004a_enum_values.sql` ⚠️ **ejecuta este solo, espera a que termine, y comprueba su verificación antes de seguir**
      4. `supabase/migration_004b_major_update.sql`
      5. `supabase/migration_005_stock_reclaim_and_notifications.sql`
+     6. `supabase/migration_006_cancel_order.sql`
 
      Ninguna borra datos de negocio. Los pasos 3 y 4 tienen que ir
      **separados** a propósito: `ALTER TYPE ... ADD VALUE` (paso 3) no puede
@@ -62,7 +63,8 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
      de almacén, y los campos nuevos de venta (matrícula, batería vieja,
      origen, garantía). El 005 añade que el admin pueda retirar stock a un
      conductor y devolverlo al almacén, y el aviso de "pedido rechazado"
-     para almacén/admin.
+     para almacén/admin. El 006 añade la posibilidad de deshacer un pedido
+     mientras siga pendiente.
 3. Ve a **Project Settings → API** y copia:
    - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
    - `anon public key` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -90,7 +92,7 @@ Edita `.env.local` con tus valores reales de Supabase.
 
 ```sql
 insert into profiles (id, full_name, email, role)
-values ('PEGA-AQUI-EL-UID', 'Tu Nombre', 'tu-correo@empresa.com', 'admin');
+values ('fb79b33f-723e-4b7b-b23f-a053de3665c7', 'Fabian', 'fdgo.9910@gmail.com', 'admin');
 ```
 
 A partir de aquí, **ya puedes crear el resto de usuarios (almacenero,
@@ -176,13 +178,16 @@ Acceso total a todo lo de abajo, más:
 ### Almacenero
 - **Recepción**: escanea el EAN del palet. Si no existe, rellena marca,
   modelo, amperaje, arranque en frío (CCA), tecnología (normal/AGM/EFB), si
-  es especial y motivo. Luego indica la empresa distribuidora y la cantidad
-  → se suma al stock del almacén.
+  es especial y motivo. Si el modelo ya existía, también puedes tocar
+  **Editar** ahí mismo para corregir sus datos antes de dar entrada. Luego
+  indica la empresa distribuidora y la cantidad → se suma al stock del
+  almacén.
 - **Entregar a conductor**: arma un pedido escaneando una o varias
   baterías (con las cantidades que quiera) y lo envía a un conductor. El
   stock del almacén **no se descuenta todavía** — el conductor tiene que
   aceptar el pedido desde su móvil para que se mueva el stock (o rechazarlo,
-  y entonces no se mueve nada).
+  y entonces no se mueve nada). Mientras el pedido siga pendiente, puedes
+  **deshacerlo** desde "Pedidos pendientes" (no se ha movido nada todavía).
 - **Venta directa de almacén**: vende a un cliente particular directamente
   desde el stock del almacén central (no tiene nada que ver con la venta
   comercial). Funciona igual que la venta de un conductor: matrícula del
@@ -190,8 +195,11 @@ Acceso total a todo lo de abajo, más:
   opción de marcarla como garantía.
 - **Devoluciones**: registra devoluciones simples (vuelven al stock
   vendible) o de garantía (van a un almacén de garantías aparte, sin
-  mezclarse con lo que se puede vender). Puede venir de un conductor
-  (se le resta de su stock) o directamente de un cliente/taller.
+  mezclarse con lo que se puede vender). El proceso de escaneo funciona
+  igual que en Recepción: la batería devuelta NO tiene que salir de ningún
+  stock existente — si su EAN no está en el catálogo, se da de alta ahí
+  mismo. Puede venir de un conductor (se le resta de su stock) o
+  directamente de un cliente/taller (no resta de ningún sitio, solo suma).
 - **Modelos de producto**: catálogo de baterías, con edición y eliminación
   (si el modelo ya tiene movimientos, se desactiva en vez de borrarse, para
   no perder el histórico).

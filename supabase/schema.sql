@@ -501,6 +501,33 @@ begin
 end;
 $$ language plpgsql security definer;
 
+-- 3b) DESHACER/CANCELAR UN PEDIDO QUE SIGUE PENDIENTE (admin/almacenero).
+-- Como todavía no se ha movido ningún stock (eso solo pasa al aceptar), se
+-- puede borrar sin más: es como si nunca se hubiera creado.
+create or replace function fn_cancel_driver_order(p_order_id uuid)
+returns void as $$
+declare
+  v_user uuid := auth.uid();
+  v_role user_role;
+  v_status driver_order_status;
+begin
+  select role into v_role from profiles where id = v_user;
+  if v_role is distinct from 'admin' and v_role is distinct from 'almacenero' then
+    raise exception 'Solo el almacén o un administrador pueden deshacer un pedido';
+  end if;
+
+  select status into v_status from driver_deliveries where id = p_order_id for update;
+  if v_status is null then
+    raise exception 'El pedido no existe';
+  end if;
+  if v_status <> 'pending' then
+    raise exception 'Solo se puede deshacer un pedido que todavía está pendiente de respuesta';
+  end if;
+
+  delete from driver_deliveries where id = p_order_id;
+end;
+$$ language plpgsql security definer;
+
 -- 4) VENTA DE CONDUCTOR (resta stock del conductor, suma a su billetera).
 --    Admite venta de garantía (0€, o solo la diferencia si sube de gama).
 create or replace function fn_driver_sale(

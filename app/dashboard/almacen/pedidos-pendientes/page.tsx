@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
+import ConfirmModal from '@/components/ConfirmModal';
+import toast from 'react-hot-toast';
 
 interface OrderItem {
   id: string;
@@ -36,6 +38,8 @@ export default function PedidosPendientesPage() {
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<'pending' | 'all'>('pending');
   const [searchDriver, setSearchDriver] = useState('');
+  const [toCancel, setToCancel] = useState<Order | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -50,6 +54,21 @@ export default function PedidosPendientesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterStatus]);
 
+  async function confirmCancel() {
+    if (!toCancel) return;
+    setSubmitting(true);
+    const res = await fetch(`/api/driver-orders/${toCancel.id}/cancel`, { method: 'POST' });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    setToCancel(null);
+    if (!res.ok) {
+      toast.error(json.error || 'No se pudo deshacer el pedido.');
+      return;
+    }
+    toast.success('Pedido deshecho. Es como si nunca se hubiera creado.');
+    load();
+  }
+
   const filtered = orders.filter((o) =>
     (o.driver?.full_name ?? '').toLowerCase().includes(searchDriver.toLowerCase())
   );
@@ -59,7 +78,8 @@ export default function PedidosPendientesPage() {
     <div className="mx-auto max-w-2xl">
       <h1 className="text-2xl font-semibold text-slate-900">Pedidos pendientes</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Pedidos preparados para conductores que todavía no han aceptado o rechazado.
+        Pedidos preparados para conductores que todavía no han aceptado o rechazado. Puedes deshacer
+        un pedido mientras siga pendiente (antes de que el conductor responda).
       </p>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -108,11 +128,30 @@ export default function PedidosPendientesPage() {
               ))}
             </div>
             {order.notes && <p className="mt-2 text-xs text-slate-400">Nota: {order.notes}</p>}
+            {order.status === 'pending' && (
+              <button
+                className="btn-secondary mt-3 text-red-600"
+                onClick={() => setToCancel(order)}
+              >
+                Deshacer pedido
+              </button>
+            )}
           </div>
         ))}
       </div>
 
       <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
+
+      <ConfirmModal
+        open={!!toCancel}
+        title="Deshacer pedido"
+        description={`Se cancelará el pedido de ${toCancel?.driver?.full_name ?? 'este conductor'}. No se ha movido ningún stock todavía, así que es como si nunca se hubiera creado.`}
+        confirmLabel="Sí, deshacer"
+        tone="danger"
+        loading={submitting}
+        onConfirm={confirmCancel}
+        onCancel={() => setToCancel(null)}
+      />
     </div>
   );
 }

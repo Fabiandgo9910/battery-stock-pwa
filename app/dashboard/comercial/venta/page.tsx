@@ -32,7 +32,7 @@ export default function VentaComercialPage() {
 
   useEffect(() => {
     async function load() {
-      const { data: wh } = await supabase.from('warehouses').select('*').eq('active', true).limit(1).single();
+      const { data: wh } = await supabase.from('warehouses').select('*').eq('active', true).eq('is_warranty_holding', false).limit(1).single();
       if (wh) setWarehouseId(wh.id);
       const { data: pos } = await supabase.from('points_of_sale').select('id, name').eq('active', true).order('name');
       setPointsOfSale(pos ?? []);

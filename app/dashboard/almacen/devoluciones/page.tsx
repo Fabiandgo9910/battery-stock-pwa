@@ -29,12 +29,25 @@ export default function DevolucionesPage() {
   const [returnType, setReturnType] = useState<'devolucion' | 'garantia'>('devolucion');
   const [sourceKind, setSourceKind] = useState<'driver' | 'other'>('other');
   const [driverId, setDriverId] = useState('');
+  const [ean, setEan] = useState('');
   const [model, setModel] = useState<ProductModel | null>(null);
   const [looking, setLooking] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Cuando el EAN escaneado no existe en el catálogo, se da de alta el
+  // modelo aquí mismo — igual que en Recepción — porque una batería
+  // devuelta (sobre todo de garantía) puede no estar registrada todavía.
+  const [creatingNewModel, setCreatingNewModel] = useState(false);
+  const [brand, setBrand] = useState('');
+  const [modelName, setModelName] = useState('');
+  const [amperage, setAmperage] = useState('');
+  const [cca, setCca] = useState('');
+  const [tech, setTech] = useState<'normal' | 'agm' | 'efb'>('normal');
+  const [isSpecial, setIsSpecial] = useState(false);
+  const [specialReason, setSpecialReason] = useState('');
 
   const {
     page: returnsPage,
@@ -62,12 +75,21 @@ export default function DevolucionesPage() {
   }, []);
 
   async function handleScan(code: string) {
+    setEan(code);
     setLooking(true);
     try {
       const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
       const json = await res.json();
       if (!json.found) {
-        toast.error('Código no reconocido en el catálogo.');
+        // No está en el catálogo: lo damos de alta aquí, como en Recepción.
+        setCreatingNewModel(true);
+        setBrand('');
+        setModelName('');
+        setAmperage('');
+        setCca('');
+        setTech('normal');
+        setIsSpecial(false);
+        setSpecialReason('');
         return;
       }
       setModel(json.product_model);
@@ -76,8 +98,41 @@ export default function DevolucionesPage() {
     }
   }
 
+  async function createNewModelAndContinue() {
+    if (!brand || !modelName) {
+      toast.error('Marca y modelo son obligatorios.');
+      return;
+    }
+    setSubmitting(true);
+    const res = await fetch('/api/product-models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ean_code: ean,
+        brand,
+        model_name: modelName,
+        amperage_ah: amperage ? Number(amperage) : undefined,
+        cold_cranking_amps: cca ? Number(cca) : undefined,
+        battery_tech: tech,
+        is_special: isSpecial,
+        special_reason: isSpecial ? specialReason : undefined,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al crear el modelo.');
+      return;
+    }
+    setModel(json.product_model);
+    setCreatingNewModel(false);
+    toast.success('Modelo dado de alta. Ahora indica la cantidad devuelta.');
+  }
+
   function reset() {
+    setEan('');
     setModel(null);
+    setCreatingNewModel(false);
     setQuantity(1);
     setNotes('');
     setSourceKind('other');
@@ -123,7 +178,9 @@ export default function DevolucionesPage() {
       <h1 className="text-2xl font-semibold text-slate-900">Devoluciones</h1>
       <p className="mt-1 text-sm text-slate-500">
         Registra una devolución simple (vuelve al stock vendible) o de garantía (se guarda aparte,
-        en el almacén de garantías, sin mezclarse con lo que se puede vender).
+        en el almacén de garantías, sin mezclarse con lo que se puede vender). No hace falta que la
+        batería estuviera antes en ningún stock: si el EAN no está en el catálogo, se da de alta aquí
+        mismo, igual que en Recepción.
       </p>
 
       <div className="card mt-6">
@@ -180,13 +237,71 @@ export default function DevolucionesPage() {
           </select>
         )}
 
-        {!model && (
+        {!model && !creatingNewModel && (
           <>
             <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
-              <BarcodeScanner active={!model} onScan={handleScan} />
+              <BarcodeScanner active={!model && !creatingNewModel} onScan={handleScan} />
             </ErrorBoundary>
             {looking && <p className="mt-2 text-center text-sm text-charge-700">Buscando modelo…</p>}
           </>
+        )}
+
+        {creatingNewModel && (
+          <div>
+            <p className="mb-4 rounded-xl bg-charge-50 px-4 py-2 text-sm text-charge-700">
+              Código <strong>{ean}</strong> no encontrado en el catálogo. Rellena los datos de esta batería.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="label-field">Marca *</label>
+                <input className="input-field" value={brand} onChange={(e) => setBrand(e.target.value)} />
+              </div>
+              <div>
+                <label className="label-field">Modelo *</label>
+                <input className="input-field" value={modelName} onChange={(e) => setModelName(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-field">Amperaje (Ah)</label>
+                  <input type="number" className="input-field" value={amperage} onChange={(e) => setAmperage(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label-field">Arranque en frío (CCA)</label>
+                  <input type="number" className="input-field" value={cca} onChange={(e) => setCca(e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <label className="label-field">Tecnología</label>
+                <select className="input-field" value={tech} onChange={(e) => setTech(e.target.value as any)}>
+                  <option value="normal">Normal</option>
+                  <option value="agm">AGM</option>
+                  <option value="efb">EFB</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="return-special"
+                  type="checkbox"
+                  checked={isSpecial}
+                  onChange={(e) => setIsSpecial(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                <label htmlFor="return-special" className="text-sm text-slate-700">Es una batería especial</label>
+              </div>
+              {isSpecial && (
+                <div>
+                  <label className="label-field">Motivo</label>
+                  <input className="input-field" value={specialReason} onChange={(e) => setSpecialReason(e.target.value)} />
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button className="btn-secondary flex-1" onClick={reset}>Cancelar</button>
+              <button className="btn-charge flex-1" disabled={submitting} onClick={createNewModelAndContinue}>
+                {submitting ? 'Guardando…' : 'Guardar y continuar'}
+              </button>
+            </div>
+          </div>
         )}
 
         {model && (
