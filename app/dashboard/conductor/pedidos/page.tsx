@@ -5,6 +5,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
+import { createBrowserClient } from '@/lib/supabaseClient';
 
 interface OrderItem {
   id: string;
@@ -36,6 +37,20 @@ export default function PedidosConductorPage() {
 
   useEffect(() => {
     load();
+
+    const supabase = createBrowserClient();
+    const channel = supabase
+      .channel('driver-orders-list')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'driver_deliveries' },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   async function respond() {

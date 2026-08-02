@@ -489,7 +489,7 @@ begin
 
   insert into stock_movements(movement_type, product_model_id, quantity, from_location, to_location, reference_table, reference_id, performed_by)
   values (
-    case when p_type = 'garantia' then 'return_garantia' else 'return_to_warehouse' end,
+    (case when p_type = 'garantia' then 'return_garantia' else 'return_to_warehouse' end)::movement_type,
     p_product_model_id, p_quantity,
     case when p_source_driver_id is not null then 'driver:' || p_source_driver_id::text else 'other' end,
     'warehouse:' || v_dest_warehouse::text,

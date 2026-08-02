@@ -15,6 +15,7 @@ interface ReturnRow {
   type: 'devolucion' | 'garantia';
   quantity: number;
   source: string;
+  notes: string | null;
   created_at: string;
   product_model: { brand: string; model_name: string } | null;
   source_driver: { full_name: string } | null;
@@ -32,7 +33,7 @@ export default function DevolucionesPage() {
   const [ean, setEan] = useState('');
   const [model, setModel] = useState<ProductModel | null>(null);
   const [looking, setLooking] = useState(false);
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(0);
   const [notes, setNotes] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -133,7 +134,7 @@ export default function DevolucionesPage() {
     setEan('');
     setModel(null);
     setCreatingNewModel(false);
-    setQuantity(1);
+    setQuantity(0);
     setNotes('');
     setSourceKind('other');
     setDriverId('');
@@ -313,19 +314,36 @@ export default function DevolucionesPage() {
               <label className="label-field">Cantidad</label>
               <input
                 type="number"
-                min={1}
+                min={0}
                 className="input-field text-lg font-semibold"
                 value={quantity}
                 onChange={(e) => setQuantity(Number(e.target.value))}
               />
             </div>
             <div className="mt-4">
-              <label className="label-field">Notas (opcional)</label>
-              <textarea className="input-field" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <label className="label-field">Observaciones</label>
+              <textarea
+                className="input-field"
+                rows={3}
+                placeholder="Motivo de la devolución, estado de la batería, referencia del cliente, etc."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
             </div>
             <div className="mt-6 flex gap-3">
               <button className="btn-secondary flex-1" onClick={reset}>Cancelar</button>
-              <button className="btn-charge flex-1" onClick={() => setConfirmOpen(true)}>Registrar devolución</button>
+              <button
+                className="btn-charge flex-1"
+                onClick={() => {
+                  if (quantity <= 0) {
+                    toast.error('Indica una cantidad mayor que 0.');
+                    return;
+                  }
+                  setConfirmOpen(true);
+                }}
+              >
+                Registrar devolución
+              </button>
             </div>
           </>
         )}
@@ -347,6 +365,7 @@ export default function DevolucionesPage() {
                 {r.source_driver ? `De ${r.source_driver.full_name}` : 'Directo de cliente/taller'} ·{' '}
                 {new Date(r.created_at).toLocaleString('es-ES')}
               </p>
+              {r.notes && <p className="mt-0.5 text-xs text-slate-500">"{r.notes}"</p>}
             </div>
             <strong className="text-slate-900">{r.quantity}</strong>
           </div>

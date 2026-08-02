@@ -895,7 +895,7 @@ begin
 
   insert into stock_movements(movement_type, product_model_id, quantity, from_location, to_location, reference_table, reference_id, performed_by)
   values (
-    case when p_type = 'garantia' then 'return_garantia' else 'return_to_warehouse' end,
+    (case when p_type = 'garantia' then 'return_garantia' else 'return_to_warehouse' end)::movement_type,
     p_product_model_id, p_quantity,
     case when p_source_driver_id is not null then 'driver:' || p_source_driver_id::text else 'other' end,
     'warehouse:' || v_dest_warehouse::text,
@@ -1059,6 +1059,26 @@ create policy stock_movements_read on stock_movements for select
     or from_location = 'driver:' || auth.uid()::text
     or to_location = 'driver:' || auth.uid()::text);
 create policy stock_movements_write on stock_movements for insert with check (auth.uid() is not null);
+
+-- ============================================================================
+-- REALTIME: pedidos a conductor en vivo (para que "Pedidos pendientes" y el
+-- aviso de rechazo se actualicen al instante, sin depender solo de sondeo)
+-- ============================================================================
+do $$
+begin
+  alter publication supabase_realtime add table driver_deliveries;
+exception when duplicate_object then
+  null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table driver_delivery_items;
+exception when duplicate_object then
+  null;
+end $$;
+
+alter table driver_deliveries replica identity full;
 
 -- ============================================================================
 -- DATOS INICIALES

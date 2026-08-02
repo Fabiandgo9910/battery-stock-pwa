@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { createBrowserClient } from '@/lib/supabaseClient';
 
 interface OrderItem {
   id: string;
@@ -40,8 +41,25 @@ export default function RejectedOrderAlert() {
 
   useEffect(() => {
     checkRejected();
-    const interval = setInterval(checkRejected, 20000);
-    return () => clearInterval(interval);
+
+    // Tiempo real: en cuanto un conductor rechaza un pedido, el aviso salta
+    // al instante para admin/almacenero (RLS ya limita a lo que puede ver).
+    // Sondeo de respaldo cada 30s por si se pierde la conexión de Realtime.
+    const supabase = createBrowserClient();
+    const channel = supabase
+      .channel('warehouse-rejected-orders')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'driver_deliveries' },
+        () => checkRejected()
+      )
+      .subscribe();
+
+    const interval = setInterval(checkRejected, 30000);
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [checkRejected]);
 
   const current = rejected[0];

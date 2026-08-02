@@ -5,6 +5,7 @@ import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
 import ConfirmModal from '@/components/ConfirmModal';
 import toast from 'react-hot-toast';
+import { createBrowserClient } from '@/lib/supabaseClient';
 
 interface OrderItem {
   id: string;
@@ -51,6 +52,22 @@ export default function PedidosPendientesPage() {
 
   useEffect(() => {
     load();
+
+    // Tiempo real: la lista se actualiza al instante cuando un conductor
+    // acepta/rechaza, o cuando se crea/cancela un pedido nuevo.
+    const supabase = createBrowserClient();
+    const channel = supabase
+      .channel('warehouse-orders-list')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'driver_deliveries' },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterStatus]);
 

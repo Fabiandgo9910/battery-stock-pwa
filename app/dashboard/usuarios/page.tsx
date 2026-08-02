@@ -20,7 +20,6 @@ export default function UsuariosPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState<Profile | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [toDeactivate, setToDeactivate] = useState<Profile | null>(null);
   const [toDelete, setToDelete] = useState<Profile | null>(null);
   const [search, setSearch] = useState('');
 
@@ -119,28 +118,10 @@ export default function UsuariosPage() {
     load();
   }
 
-  async function toggleActive(user: Profile) {
-    await fetch(`/api/users/${user.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: true }),
-    });
-    toast.success('Usuario reactivado.');
-    load();
-  }
-
-  async function confirmDeactivate() {
-    if (!toDeactivate) return;
-    await fetch(`/api/users/${toDeactivate.id}`, { method: 'DELETE' });
-    toast.success('Usuario desactivado.');
-    setToDeactivate(null);
-    load();
-  }
-
   async function confirmDelete() {
     if (!toDelete) return;
     setSubmitting(true);
-    const res = await fetch(`/api/users/${toDelete.id}?permanent=true`, { method: 'DELETE' });
+    const res = await fetch(`/api/users/${toDelete.id}`, { method: 'DELETE' });
     const json = await res.json().catch(() => ({}));
     setSubmitting(false);
     setToDelete(null);
@@ -241,19 +222,12 @@ export default function UsuariosPage() {
         {pageItems.map((u) => (
           <div key={u.id} className="card flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-semibold text-slate-900">
-                {u.full_name} {!u.active && <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-600">Inactivo</span>}
-              </p>
+              <p className="font-semibold text-slate-900">{u.full_name}</p>
               <p className="text-sm text-slate-500">{u.email} · {ROLE_LABEL[u.role]}</p>
               {u.vehicle_plate && <p className="text-xs text-slate-400">Vehículo: {u.vehicle_plate} {u.zone ? `· Zona: ${u.zone}` : ''}</p>}
             </div>
             <div className="flex flex-wrap gap-2">
               <button className="btn-secondary" onClick={() => startEdit(u)}>Editar</button>
-              {u.active ? (
-                <button className="btn-secondary" onClick={() => setToDeactivate(u)}>Desactivar</button>
-              ) : (
-                <button className="btn-secondary" onClick={() => toggleActive(u)}>Reactivar</button>
-              )}
               <button className="btn-secondary text-red-600" onClick={() => setToDelete(u)}>Eliminar</button>
             </div>
           </div>
@@ -264,16 +238,6 @@ export default function UsuariosPage() {
       </div>
 
       <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
-
-      <ConfirmModal
-        open={!!toDeactivate}
-        title="Desactivar usuario"
-        description={`${toDeactivate?.full_name} no podrá iniciar sesión hasta que se reactive. El historial se conserva.`}
-        confirmLabel="Desactivar"
-        tone="danger"
-        onConfirm={confirmDeactivate}
-        onCancel={() => setToDeactivate(null)}
-      />
 
       <ConfirmModal
         open={!!toDelete}

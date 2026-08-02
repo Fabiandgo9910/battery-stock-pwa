@@ -17,7 +17,7 @@ export default function VentaDirectaAlmacenPage() {
   const [model, setModel] = useState<ProductModel | null>(null);
   const [availableStock, setAvailableStock] = useState<number | null>(null);
   const [looking, setLooking] = useState(false);
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(0);
   const [amountCash, setAmountCash] = useState('');
   const [amountCard, setAmountCard] = useState('');
   const [isWarranty, setIsWarranty] = useState(false);
@@ -63,7 +63,7 @@ export default function VentaDirectaAlmacenPage() {
     setEan('');
     setModel(null);
     setAvailableStock(null);
-    setQuantity(1);
+    setQuantity(0);
     setAmountCash('');
     setAmountCard('');
     setIsWarranty(false);
@@ -75,6 +75,10 @@ export default function VentaDirectaAlmacenPage() {
   const total = (Number(amountCash) || 0) + (Number(amountCard) || 0);
 
   async function submit() {
+    if (quantity <= 0) {
+      toast.error('Indica una cantidad mayor que 0.');
+      return;
+    }
     if (!isWarranty && total <= 0) {
       toast.error('Introduce el importe cobrado.');
       return;
@@ -146,7 +150,7 @@ export default function VentaDirectaAlmacenPage() {
               <label className="label-field">Cantidad</label>
               <input
                 type="number"
-                min={1}
+                min={0}
                 max={availableStock ?? undefined}
                 className="input-field text-lg font-semibold"
                 value={quantity}

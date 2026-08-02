@@ -18,7 +18,7 @@ export default function RecepcionPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(0);
   const [notes, setNotes] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -60,7 +60,7 @@ export default function RecepcionPage() {
     setStep('scanning');
     setEan('');
     setFoundModel(null);
-    setQuantity(1);
+    setQuantity(0);
     setNotes('');
     setBrand('');
     setModelName('');
@@ -311,7 +311,7 @@ export default function RecepcionPage() {
               <label className="label-field">Cantidad recibida *</label>
               <input
                 type="number"
-                min={1}
+                min={0}
                 className="input-field text-lg font-semibold"
                 value={quantity}
                 onChange={(e) => setQuantity(Number(e.target.value))}
@@ -325,7 +325,16 @@ export default function RecepcionPage() {
 
           <div className="mt-6 flex gap-3">
             <button className="btn-secondary flex-1" onClick={resetFlow}>Cancelar</button>
-            <button className="btn-charge flex-1" onClick={() => setConfirmOpen(true)}>
+            <button
+              className="btn-charge flex-1"
+              onClick={() => {
+                if (quantity <= 0) {
+                  toast.error('Indica una cantidad mayor que 0.');
+                  return;
+                }
+                setConfirmOpen(true);
+              }}
+            >
               Registrar entrada
             </button>
           </div>

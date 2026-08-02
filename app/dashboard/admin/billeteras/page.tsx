@@ -30,7 +30,7 @@ export default function BilleterasAdminPage() {
   const [searchBattery, setSearchBattery] = useState('');
 
   const [reclaimTarget, setReclaimTarget] = useState<{ driver: DriverRow['driver']; stock: StockRow } | null>(null);
-  const [reclaimQty, setReclaimQty] = useState(1);
+  const [reclaimQty, setReclaimQty] = useState(0);
   const [reclaimConfirmOpen, setReclaimConfirmOpen] = useState(false);
 
   async function load() {
@@ -65,11 +65,15 @@ export default function BilleterasAdminPage() {
 
   function openReclaim(driver: DriverRow['driver'], stock: StockRow) {
     setReclaimTarget({ driver, stock });
-    setReclaimQty(1);
+    setReclaimQty(0);
   }
 
   async function confirmReclaim() {
     if (!reclaimTarget) return;
+    if (reclaimQty <= 0) {
+      toast.error('Indica una cantidad mayor que 0.');
+      return;
+    }
     setSubmitting(true);
     const res = await fetch('/api/admin/reclaim-driver-stock', {
       method: 'POST',
@@ -236,7 +240,7 @@ export default function BilleterasAdminPage() {
               <label className="label-field">Cantidad a retirar (disponible: {reclaimTarget.stock.quantity})</label>
               <input
                 type="number"
-                min={1}
+                min={0}
                 max={reclaimTarget.stock.quantity}
                 className="input-field text-lg font-semibold"
                 value={reclaimQty}
@@ -247,7 +251,13 @@ export default function BilleterasAdminPage() {
               <button className="btn-secondary flex-1" onClick={() => setReclaimTarget(null)}>Cancelar</button>
               <button
                 className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 flex-1"
-                onClick={() => setReclaimConfirmOpen(true)}
+                onClick={() => {
+                  if (reclaimQty <= 0) {
+                    toast.error('Indica una cantidad mayor que 0.');
+                    return;
+                  }
+                  setReclaimConfirmOpen(true);
+                }}
               >
                 Retirar
               </button>

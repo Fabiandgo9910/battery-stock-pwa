@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { createBrowserClient } from '@/lib/supabaseClient';
 
 interface OrderItem {
   id: string;
@@ -41,9 +42,26 @@ export default function PendingOrderGate() {
 
   useEffect(() => {
     checkPending();
-    // Vuelve a comprobar cada 20s por si llega un pedido nuevo mientras navega.
-    const interval = setInterval(checkPending, 20000);
-    return () => clearInterval(interval);
+
+    // Tiempo real: en cuanto el almacén crea un pedido nuevo para este
+    // conductor, aparece al instante (RLS ya filtra a solo sus propios
+    // pedidos). Se mantiene además un sondeo de respaldo cada 30s por si la
+    // conexión de Realtime se pierde momentáneamente.
+    const supabase = createBrowserClient();
+    const channel = supabase
+      .channel('driver-pending-orders')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'driver_deliveries' },
+        () => checkPending()
+      )
+      .subscribe();
+
+    const interval = setInterval(checkPending, 30000);
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [checkPending]);
 
   const current = orders[0];

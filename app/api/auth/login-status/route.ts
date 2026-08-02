@@ -15,10 +15,9 @@ function adminClient() {
 
 // POST /api/auth/login-status
 // Ruta PÚBLICA (sin sesión) usada solo tras un fallo de inicio de sesión,
-// para poder decir con precisión si la cuenta no existe o está desactivada,
-// en vez del mensaje genérico "credenciales incorrectas". Usa el cliente de
-// service role porque un usuario anónimo no tiene permiso (por RLS) para
-// leer la tabla profiles.
+// para poder decir con precisión si la cuenta no existe, en vez del mensaje
+// genérico "credenciales incorrectas". Usa el cliente de service role porque
+// un usuario anónimo no tiene permiso (por RLS) para leer la tabla profiles.
 export async function POST(req: NextRequest) {
   try {
     const parsed = schema.safeParse(await req.json().catch(() => null));
@@ -27,12 +26,11 @@ export async function POST(req: NextRequest) {
     const admin = adminClient();
     const { data: profile } = await admin
       .from('profiles')
-      .select('active')
+      .select('id')
       .eq('email', parsed.data.email.trim().toLowerCase())
       .maybeSingle();
 
     if (!profile) return NextResponse.json({ status: 'not_found' });
-    if (!profile.active) return NextResponse.json({ status: 'inactive' });
     return NextResponse.json({ status: 'wrong_password' });
   } catch (err) {
     console.error('POST /api/auth/login-status', err);

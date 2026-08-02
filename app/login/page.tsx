@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import toast from 'react-hot-toast';
@@ -11,15 +11,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // Si el middleware nos rebotó aquí por cuenta desactivada, avisamos.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('reason') === 'inactive') {
-      toast.error('No existe ninguna cuenta activa con ese correo: está desactivada.', { duration: 6000 });
-      window.history.replaceState({}, '', '/login');
-    }
-  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -45,15 +36,13 @@ export default function LoginPage() {
       const json = await res.json();
       if (json.status === 'not_found') {
         toast.error('No existe ninguna cuenta con ese correo.');
-      } else if (json.status === 'inactive') {
-        toast.error('No existe ninguna cuenta activa con ese correo: está desactivada.');
       } else if (json.status === 'wrong_password') {
         toast.error('Contraseña incorrecta.');
       } else {
         toast.error('No se pudo iniciar sesión. Inténtalo de nuevo.');
       }
     } catch {
-      toast.error('Credenciales incorrectas o usuario inactivo.');
+      toast.error('Credenciales incorrectas.');
     } finally {
       setLoading(false);
     }

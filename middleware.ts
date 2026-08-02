@@ -35,15 +35,13 @@ export async function middleware(req: NextRequest) {
   if (session && isProtectedRoute) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role, active')
+      .select('role')
       .eq('id', session.user.id)
       .single();
 
-    if (!profile || !profile.active) {
+    if (!profile) {
       await supabase.auth.signOut();
-      const url = new URL('/login', req.url);
-      url.searchParams.set('reason', 'inactive');
-      return NextResponse.redirect(url);
+      return NextResponse.redirect(new URL('/login', req.url));
     }
 
     const allowed = ROLE_ROUTES[profile.role] ?? [];

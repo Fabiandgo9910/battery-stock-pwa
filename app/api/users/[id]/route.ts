@@ -53,24 +53,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-// DELETE /api/users/:id                 -> desactiva (soft, por defecto)
-// DELETE /api/users/:id?permanent=true  -> elimina de verdad (Auth + perfil),
-//   SALVO que el usuario sea conductor/almacenero y tenga stock físico
-//   asignado (driver_stock con cantidad > 0): en ese caso se bloquea con un
-//   mensaje explícito y NO se borra ni se desactiva, para forzar a retirarle
-//   el stock antes.
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+// DELETE /api/users/:id -> elimina de verdad (Auth + perfil), SALVO que el
+//   usuario tenga stock físico asignado (driver_stock con cantidad > 0): en
+//   ese caso se bloquea con un mensaje explícito y NO se borra, para forzar
+//   a retirarle el stock antes.
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const supabase = createRouteClient();
     const guard = await requireAdmin(supabase);
     if (guard.error) return guard.error;
 
-    const permanent = req.nextUrl.searchParams.get('permanent') === 'true';
-
-    // Comprobación explícita de stock (aplica a cualquier rol que pueda tener
-    // driver_stock: conductores, y almaceneros que venden directo también
-    // podrían tener saldo en su billetera pero no stock propio salvo que se
-    // les haya entregado algo por error).
     const { data: stockRows, error: stockErr } = await supabase
       .from('driver_stock')
       .select('quantity, product_model:product_models(brand, model_name)')
@@ -94,13 +86,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       );
     }
 
-    if (!permanent) {
-      const { error } = await supabase.from('profiles').update({ active: false }).eq('id', params.id);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      return NextResponse.json({ ok: true, deleted: false });
-    }
-
-    // Sin stock pendiente: procedemos al borrado permanente real.
     const admin = adminClient();
     const { error: authErr } = await admin.auth.admin.deleteUser(params.id);
 

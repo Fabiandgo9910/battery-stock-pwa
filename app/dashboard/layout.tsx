@@ -31,7 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard/conductor/billetera', label: 'Mi caja', roles: ['conductor'], icon: '👛' },
   { href: '/dashboard/comercial/venta', label: 'Venta comercial', roles: ['admin', 'almacenero', 'comercial'], icon: '🧾' },
   { href: '/dashboard/comercial/facturas', label: 'Facturas', roles: ['admin', 'almacenero', 'comercial'], icon: '📄' },
-  { href: '/dashboard/pos', label: 'Compradores comercial', roles: ['admin', 'comercial'], icon: '🏪' },
+  { href: '/dashboard/pos', label: 'Ventas comerciales', roles: ['admin', 'comercial'], icon: '🏪' },
   { href: '/dashboard/usuarios', label: 'Usuarios', roles: ['admin'], icon: '👥' },
   { href: '/dashboard/admin/billeteras', label: 'Cajas de conductores', roles: ['admin'], icon: '💰' },
   { href: '/dashboard/admin/ventas-diarias', label: 'Ventas del día', roles: ['admin'], icon: '📊' },

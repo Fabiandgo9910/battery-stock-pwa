@@ -52,6 +52,10 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
      4. `supabase/migration_004b_major_update.sql`
      5. `supabase/migration_005_stock_reclaim_and_notifications.sql`
      6. `supabase/migration_006_cancel_order.sql`
+     7. `supabase/migration_007_realtime_orders.sql` — corrige el bug real de
+        las devoluciones (`fn_process_return`), vuelve a aplicar
+        `fn_cancel_driver_order` por si acaso, y activa Supabase Realtime en
+        los pedidos a conductor para que se actualicen al instante.
 
      Ninguna borra datos de negocio. Los pasos 3 y 4 tienen que ir
      **separados** a propósito: `ALTER TYPE ... ADD VALUE` (paso 3) no puede
@@ -92,7 +96,7 @@ Edita `.env.local` con tus valores reales de Supabase.
 
 ```sql
 insert into profiles (id, full_name, email, role)
-values ('fb79b33f-723e-4b7b-b23f-a053de3665c7', 'Fabian', 'fdgo.9910@gmail.com', 'admin');
+values ('PEGA-AQUI-EL-UID', 'Tu Nombre', 'tu-correo@empresa.com', 'admin');
 ```
 
 A partir de aquí, **ya puedes crear el resto de usuarios (almacenero,
@@ -154,7 +158,8 @@ También puedes desplegarlo en cualquier hosting compatible con Next.js
 
 ### Administrador
 Acceso total a todo lo de abajo, más:
-- **Usuarios**: crear, editar, desactivar/reactivar y **eliminar de verdad**.
+- **Usuarios**: crear, editar y **eliminar de verdad** (sin estados de
+  "activo/inactivo": solo edición y borrado, para mantenerlo simple).
   El borrado físico se bloquea automáticamente (con un mensaje explícito) si
   el usuario todavía tiene stock de baterías asignado — hay que retirárselo
   primero (entregarlo a otro conductor o hacer una devolución al almacén).
@@ -166,10 +171,11 @@ Acceso total a todo lo de abajo, más:
   aquí (tocando la batería en cuestión): vuelve al almacén central.
 - **Pedidos pendientes**: ve el estado de todos los pedidos que el
   almacenero (o tú mismo) le habéis preparado a cada conductor — pendientes
-  de respuesta, aceptados o rechazados, con buscador por conductor.
-- Si un conductor **rechaza** un pedido, te salta un aviso emergente (a ti
-  y al almacenero) la próxima vez que uses la app, hasta que lo marques
-  como visto.
+  de respuesta, aceptados o rechazados, con buscador por conductor. Se
+  actualiza al instante en cuanto el conductor responde. Mientras un pedido
+  siga pendiente, puedes **deshacerlo**.
+- Si un conductor **rechaza** un pedido, te salta **al instante** un aviso
+  emergente (a ti y al almacenero) hasta que lo marques como visto.
 - **Ventas del día**: resumen por conductor/vendedor, con unidades y dinero
   separado por efectivo y tarjeta, y cuántas ventas fueron con cada método.
   Por defecto muestra hasta el momento actual (no hay que esperar a que
@@ -207,9 +213,10 @@ Acceso total a todo lo de abajo, más:
 - También puede hacer **venta comercial** (ver más abajo).
 
 ### Conductor / Vendedor
-- En cuanto tiene un pedido sin responder, le aparece un **aviso a pantalla
-  completa que no se puede cerrar** hasta que lo acepte o lo rechace (salta
-  en cualquier pantalla de la app, no hace falta que entre a "Pedidos").
+- En cuanto tiene un pedido sin responder, le aparece **al instante** un
+  aviso a pantalla completa que no se puede cerrar hasta que lo acepte o lo
+  rechace (salta en cualquier pantalla de la app, no hace falta que entre a
+  "Pedidos"). Usa Supabase Realtime, no un sondeo lento.
 - **Pedidos**: los pedidos que le prepara el almacén aparecen aquí
   pendientes de respuesta. Al aceptar, las baterías pasan a su stock; al
   rechazar, no se mueve nada.
@@ -252,12 +259,13 @@ Acceso total a todo lo de abajo, más:
   (`fn_*` en `schema.sql`), no como varias llamadas sueltas desde el
   frontend — así el stock nunca queda a medias si algo falla a mitad de
   camino.
-- **Eliminar usuarios**: el borrado físico (no la simple desactivación) se
-  bloquea automáticamente si el usuario tiene stock de baterías asignado,
-  con un mensaje explícito indicando qué stock hay que retirar antes.
+- **Eliminar usuarios**: no hay estado "activo/inactivo" — solo editar y
+  eliminar. El borrado se bloquea automáticamente si el usuario tiene stock
+  de baterías asignado, con un mensaje explícito indicando qué stock hay
+  que retirar antes.
 - **Login con mensajes precisos**: si el inicio de sesión falla, la app te
-  dice si es porque no existe ninguna cuenta con ese correo, porque la
-  cuenta está desactivada, o porque la contraseña es incorrecta — en vez
+  dice si es porque no existe ninguna cuenta con ese correo o porque la
+  contraseña es incorrecta — en vez
   del mensaje genérico de siempre.
 - **Todas las listas están paginadas** (usuarios, distribuidores, modelos
   de producto, facturas, clientes, cajas, ventas del día, stock, pedidos,
