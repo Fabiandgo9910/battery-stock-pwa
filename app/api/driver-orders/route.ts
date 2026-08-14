@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('driver_deliveries')
       .select(
-        '*, driver:profiles!driver_deliveries_driver_id_fkey(full_name), delivered_by_profile:profiles!driver_deliveries_delivered_by_fkey(full_name), driver_delivery_items(id, quantity, product_model:product_models(brand, model_name))'
+        '*, driver:profiles!driver_deliveries_driver_id_fkey(full_name), delivered_by_profile:profiles!driver_deliveries_delivered_by_fkey(full_name), driver_delivery_items(id, product_model_id, quantity, product_model:product_models(brand, model_name))'
       )
       .order('created_at', { ascending: false });
 

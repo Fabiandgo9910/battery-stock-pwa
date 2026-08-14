@@ -12,6 +12,7 @@ const bodySchema = z.object({
   is_warranty: z.boolean().default(false),
   customer_vehicle_plate: z.string().optional(),
   old_battery_returned: z.boolean().optional(),
+  old_battery_reason: z.string().optional(),
   sale_origin: z.enum(['particular', 'web', 'mapfre']).default('particular'),
   notes: z.string().optional(),
 });
@@ -49,6 +50,7 @@ export async function POST(req: NextRequest) {
       p_is_warranty: body.is_warranty,
       p_customer_vehicle_plate: body.customer_vehicle_plate ?? null,
       p_old_battery_returned: body.old_battery_returned ?? null,
+      p_old_battery_reason: body.old_battery_reason ?? null,
       p_sale_origin: body.sale_origin,
       p_notes: body.notes ?? null,
     });

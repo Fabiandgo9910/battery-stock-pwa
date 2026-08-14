@@ -23,6 +23,7 @@ export default function VentaDirectaAlmacenPage() {
   const [isWarranty, setIsWarranty] = useState(false);
   const [vehiclePlate, setVehiclePlate] = useState('');
   const [oldBatteryReturned, setOldBatteryReturned] = useState<'si' | 'no' | ''>('');
+  const [oldBatteryReason, setOldBatteryReason] = useState('');
   const [saleOrigin, setSaleOrigin] = useState<SaleOrigin>('particular');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -69,6 +70,7 @@ export default function VentaDirectaAlmacenPage() {
     setIsWarranty(false);
     setVehiclePlate('');
     setOldBatteryReturned('');
+    setOldBatteryReason('');
     setSaleOrigin('particular');
   }
 
@@ -95,6 +97,10 @@ export default function VentaDirectaAlmacenPage() {
       toast.error('Indica si el cliente entrega la batería vieja.');
       return;
     }
+    if (oldBatteryReturned === 'no' && !oldBatteryReason.trim()) {
+      toast.error('Indica el motivo por el que no entrega la batería vieja.');
+      return;
+    }
     setSubmitting(true);
     const res = await fetch('/api/warehouse-sale', {
       method: 'POST',
@@ -109,6 +115,7 @@ export default function VentaDirectaAlmacenPage() {
         is_warranty: isWarranty,
         customer_vehicle_plate: vehiclePlate.trim().toUpperCase(),
         old_battery_returned: oldBatteryReturned === 'si',
+        old_battery_reason: oldBatteryReturned === 'no' ? oldBatteryReason.trim() : undefined,
         sale_origin: saleOrigin,
       }),
     });
@@ -181,6 +188,18 @@ export default function VentaDirectaAlmacenPage() {
                 </select>
               </div>
             </div>
+
+            {oldBatteryReturned === 'no' && (
+              <div className="mt-4">
+                <label className="label-field">¿Por qué no entrega la batería vieja? *</label>
+                <input
+                  className="input-field"
+                  value={oldBatteryReason}
+                  onChange={(e) => setOldBatteryReason(e.target.value)}
+                  placeholder="Ej: no tenía, se la queda para otro vehículo…"
+                />
+              </div>
+            )}
 
             <div className="mt-4">
               <label className="label-field">Origen de la venta</label>

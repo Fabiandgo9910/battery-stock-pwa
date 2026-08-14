@@ -10,8 +10,17 @@ import type { ProductModel, Supplier } from '@/types/domain';
 
 type Step = 'scanning' | 'existing' | 'new-model' | 'confirm';
 
+interface ActiveLoan {
+  id: string;
+  quantity: number;
+  quantity_returned: number;
+  borrower_name: string;
+  product_model: { brand: string; model_name: string } | null;
+}
+
 export default function RecepcionPage() {
   const supabase = createBrowserClient();
+  const [mode, setMode] = useState<'reception' | 'loan-return'>('reception');
   const [step, setStep] = useState<Step>('scanning');
   const [ean, setEan] = useState('');
   const [foundModel, setFoundModel] = useState<ProductModel | null>(null);
@@ -23,6 +32,14 @@ export default function RecepcionPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [editingExisting, setEditingExisting] = useState(false);
+
+  // Modo "devolución de préstamo"
+  const [activeLoans, setActiveLoans] = useState<ActiveLoan[]>([]);
+  const [loanSearch, setLoanSearch] = useState('');
+  const [selectedLoan, setSelectedLoan] = useState<ActiveLoan | null>(null);
+  const [loanReturnQty, setLoanReturnQty] = useState(0);
+  const [loanReturnNotes, setLoanReturnNotes] = useState('');
+  const [loanConfirmOpen, setLoanConfirmOpen] = useState(false);
 
   // Formulario de modelo nuevo
   const [brand, setBrand] = useState('');
@@ -42,6 +59,17 @@ export default function RecepcionPage() {
     }
     loadBase();
   }, [supabase]);
+
+  useEffect(() => {
+    async function loadLoans() {
+      if (mode !== 'loan-return') return;
+      const res = await fetch('/api/loans');
+      const json = await res.json();
+      const loans: ActiveLoan[] = (json.loans ?? []).filter((l: any) => l.status !== 'devuelto');
+      setActiveLoans(loans);
+    }
+    loadLoans();
+  }, [mode]);
 
   async function handleScan(code: string) {
     setEan(code);
@@ -155,6 +183,30 @@ export default function RecepcionPage() {
     toast.success('Modelo actualizado.');
   }
 
+  async function submitLoanReturn() {
+    if (!selectedLoan) return;
+    setSubmitting(true);
+    const res = await fetch(`/api/loans/${selectedLoan.id}/return`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantity: loanReturnQty, notes: loanReturnNotes || undefined }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setSubmitting(false);
+    setLoanConfirmOpen(false);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al registrar la devolución.');
+      return;
+    }
+    toast.success('Devolución de préstamo registrada. Stock repuesto en el almacén.');
+    setSelectedLoan(null);
+    setLoanReturnQty(0);
+    setLoanReturnNotes('');
+    const res2 = await fetch('/api/loans');
+    const json2 = await res2.json();
+    setActiveLoans((json2.loans ?? []).filter((l: any) => l.status !== 'devuelto'));
+  }
+
   async function submitReception() {
     if (!supplierId) {
       toast.error('Selecciona la empresa distribuidora.');
@@ -191,7 +243,121 @@ export default function RecepcionPage() {
         Escanea el código EAN del palet o unidad para dar entrada al almacén.
       </p>
 
-      <div className={`card mt-6 ${step === 'scanning' ? '' : 'hidden'}`}>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setMode('reception')}
+          className={`rounded-xl border px-3 py-2.5 text-sm font-medium ${
+            mode === 'reception' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'
+          }`}
+        >
+          Recepción normal
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('loan-return')}
+          className={`rounded-xl border px-3 py-2.5 text-sm font-medium ${
+            mode === 'loan-return' ? 'border-charge-500 bg-charge-400 text-slate-900' : 'border-slate-200 text-slate-600'
+          }`}
+        >
+          Es devolución de un préstamo
+        </button>
+      </div>
+
+      {mode === 'loan-return' && (
+        <div className="card mt-4">
+          {!selectedLoan ? (
+            <>
+              <label className="label-field">Busca el préstamo (por quién lo tiene o la batería)</label>
+              <input
+                className="input-field"
+                placeholder="Buscar…"
+                value={loanSearch}
+                onChange={(e) => setLoanSearch(e.target.value)}
+              />
+              <div className="mt-3 space-y-2">
+                {activeLoans
+                  .filter((l) =>
+                    `${l.borrower_name} ${l.product_model?.brand ?? ''} ${l.product_model?.model_name ?? ''}`
+                      .toLowerCase()
+                      .includes(loanSearch.toLowerCase())
+                  )
+                  .map((loan) => (
+                    <button
+                      key={loan.id}
+                      onClick={() => {
+                        setSelectedLoan(loan);
+                        setLoanReturnQty(0);
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">
+                          {loan.product_model?.brand} {loan.product_model?.model_name}
+                        </p>
+                        <p className="text-xs text-slate-500">Con {loan.borrower_name}</p>
+                      </div>
+                      <span className="text-sm font-semibold text-charge-700">
+                        {loan.quantity - loan.quantity_returned} pend.
+                      </span>
+                    </button>
+                  ))}
+                {activeLoans.length === 0 && (
+                  <p className="text-sm text-slate-400">No hay préstamos activos.</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="font-semibold text-slate-900">
+                  {selectedLoan.product_model?.brand} {selectedLoan.product_model?.model_name}
+                </p>
+                <p className="text-sm text-slate-500">Prestado a {selectedLoan.borrower_name}</p>
+              </div>
+              <div className="mt-4">
+                <label className="label-field">
+                  Cantidad devuelta (pendiente: {selectedLoan.quantity - selectedLoan.quantity_returned})
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={selectedLoan.quantity - selectedLoan.quantity_returned}
+                  className="input-field text-lg font-semibold"
+                  value={loanReturnQty}
+                  onChange={(e) => setLoanReturnQty(Number(e.target.value))}
+                />
+              </div>
+              <div className="mt-4">
+                <label className="label-field">Observaciones</label>
+                <textarea
+                  className="input-field"
+                  rows={2}
+                  value={loanReturnNotes}
+                  onChange={(e) => setLoanReturnNotes(e.target.value)}
+                />
+              </div>
+              <div className="mt-6 flex gap-3">
+                <button className="btn-secondary flex-1" onClick={() => setSelectedLoan(null)}>Volver</button>
+                <button
+                  className="btn-charge flex-1"
+                  onClick={() => {
+                    if (loanReturnQty <= 0) {
+                      toast.error('Indica una cantidad mayor que 0.');
+                      return;
+                    }
+                    setLoanConfirmOpen(true);
+                  }}
+                >
+                  Registrar devolución
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className={`card mt-6 ${mode === 'reception' && step === 'scanning' ? '' : 'hidden'}`}>
         <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
           <BarcodeScanner active={step === 'scanning'} onScan={handleScan} />
         </ErrorBoundary>
@@ -409,6 +575,16 @@ export default function RecepcionPage() {
         loading={submitting}
         onConfirm={submitReception}
         onCancel={() => setConfirmOpen(false)}
+      />
+
+      <ConfirmModal
+        open={loanConfirmOpen}
+        title="Confirmar devolución de préstamo"
+        description={`Se repondrán ${loanReturnQty} unidades de ${selectedLoan?.product_model?.brand} ${selectedLoan?.product_model?.model_name} en el almacén.`}
+        confirmLabel="Sí, registrar"
+        loading={submitting}
+        onConfirm={submitLoanReturn}
+        onCancel={() => setLoanConfirmOpen(false)}
       />
     </div>
   );

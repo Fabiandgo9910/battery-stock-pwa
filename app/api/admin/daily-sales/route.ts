@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     const { data: sales, error } = await supabase
       .from('sales')
       .select(
-        'id, seller_id, sale_channel, amount_cash, amount_card, total_amount, sold_at, seller:profiles(full_name), sale_items(quantity)'
+        'id, seller_id, sale_channel, amount_cash, amount_card, total_amount, sold_at, old_battery_returned, seller:profiles(full_name), sale_items(quantity)'
       )
       .in('sale_channel', ['driver', 'warehouse_direct'])
       .gte('sold_at', startParam)
@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
       cash_total: number;
       card_total: number;
       sales_count: number;
+      old_batteries_collected: number;
     };
     const bySeller = new Map<string, Agg>();
 
@@ -77,6 +78,7 @@ export async function GET(req: NextRequest) {
         cash_total: 0,
         card_total: 0,
         sales_count: 0,
+        old_batteries_collected: 0,
       };
       current.units_sold += units;
       current.units_cash += unitsCash;
@@ -84,6 +86,7 @@ export async function GET(req: NextRequest) {
       current.cash_total += cash;
       current.card_total += card;
       current.sales_count += 1;
+      if (sale.old_battery_returned) current.old_batteries_collected += 1;
       bySeller.set(key, current);
     }
 
@@ -98,8 +101,9 @@ export async function GET(req: NextRequest) {
         units_card: acc.units_card + r.units_card,
         cash_total: acc.cash_total + r.cash_total,
         card_total: acc.card_total + r.card_total,
+        old_batteries_collected: acc.old_batteries_collected + r.old_batteries_collected,
       }),
-      { units_sold: 0, units_cash: 0, units_card: 0, cash_total: 0, card_total: 0 }
+      { units_sold: 0, units_cash: 0, units_card: 0, cash_total: 0, card_total: 0, old_batteries_collected: 0 }
     );
 
     return NextResponse.json({ rows, totals });

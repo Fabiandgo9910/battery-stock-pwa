@@ -14,6 +14,7 @@ interface Row {
   cash_total: number;
   card_total: number;
   sales_count: number;
+  old_batteries_collected: number;
 }
 
 function todayISO() {
@@ -41,7 +42,7 @@ export default function VentasDiariasPage() {
   const [date, setDate] = useState(todayISO());
   const [rows, setRows] = useState<Row[]>([]);
   const [search, setSearch] = useState('');
-  const [totals, setTotals] = useState({ units_sold: 0, units_cash: 0, units_card: 0, cash_total: 0, card_total: 0 });
+  const [totals, setTotals] = useState({ units_sold: 0, units_cash: 0, units_card: 0, cash_total: 0, card_total: 0, old_batteries_collected: 0 });
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -50,7 +51,7 @@ export default function VentasDiariasPage() {
     const res = await fetch(`/api/admin/daily-sales?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
     const json = await res.json();
     setRows(json.rows ?? []);
-    setTotals(json.totals ?? { units_sold: 0, units_cash: 0, units_card: 0, cash_total: 0, card_total: 0 });
+    setTotals(json.totals ?? { units_sold: 0, units_cash: 0, units_card: 0, cash_total: 0, card_total: 0, old_batteries_collected: 0 });
     setLoading(false);
   }, [date]);
 
@@ -92,7 +93,7 @@ export default function VentasDiariasPage() {
         <p className="mt-2 text-xs text-slate-400">Mostrando hasta ahora mismo · se actualiza cada 30s</p>
       )}
 
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-6">
         <div className="card text-center">
           <p className="text-xs uppercase text-slate-400">Uds. vendidas</p>
           <p className="mt-1 text-xl font-bold text-slate-900">{totals.units_sold}</p>
@@ -112,6 +113,10 @@ export default function VentasDiariasPage() {
         <div className="card text-center">
           <p className="text-xs uppercase text-slate-400">💳 Tarjeta</p>
           <p className="mt-1 text-xl font-bold text-slate-900">{totals.card_total.toFixed(2)} €</p>
+        </div>
+        <div className="card text-center">
+          <p className="text-xs uppercase text-slate-400">🔋 Baterías viejas</p>
+          <p className="mt-1 text-xl font-bold text-slate-900">{totals.old_batteries_collected}</p>
         </div>
       </div>
 

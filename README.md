@@ -56,6 +56,12 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
         las devoluciones (`fn_process_return`), vuelve a aplicar
         `fn_cancel_driver_order` por si acaso, y activa Supabase Realtime en
         los pedidos a conductor para que se actualicen al instante.
+     8. `supabase/migration_008a_enum_values.sql` ⚠️ **ejecuta este solo,
+        espera a que termine, y comprueba su verificación antes de seguir**
+     9. `supabase/migration_008b_orders_loans.sql` — pedidos solicitados por
+        el conductor, pedidos comerciales (pedido → salida de almacén, sin
+        factura), préstamos, y el motivo obligatorio cuando no se recoge la
+        batería vieja.
 
      Ninguna borra datos de negocio. Los pasos 3 y 4 tienen que ir
      **separados** a propósito: `ALTER TYPE ... ADD VALUE` (paso 3) no puede
@@ -169,75 +175,88 @@ Acceso total a todo lo de abajo, más:
   (marca/modelo/EAN, para ver quién la lleva). Reinicio de caja individual.
   También puedes **retirarle stock a un conductor** directamente desde
   aquí (tocando la batería en cuestión): vuelve al almacén central.
-- **Pedidos pendientes**: ve el estado de todos los pedidos que el
-  almacenero (o tú mismo) le habéis preparado a cada conductor — pendientes
-  de respuesta, aceptados o rechazados, con buscador por conductor. Se
-  actualiza al instante en cuanto el conductor responde. Mientras un pedido
-  siga pendiente, puedes **deshacerlo**.
-- Si un conductor **rechaza** un pedido, te salta **al instante** un aviso
-  emergente (a ti y al almacenero) hasta que lo marques como visto.
 - **Ventas del día**: resumen por conductor/vendedor, con unidades y dinero
-  separado por efectivo y tarjeta, y cuántas ventas fueron con cada método.
-  Por defecto muestra hasta el momento actual (no hay que esperar a que
-  acabe el día); se puede elegir cualquier día anterior.
+  separado por efectivo y tarjeta, cuántas ventas fueron con cada método, y
+  cuántas **baterías viejas se han recogido**. Por defecto muestra hasta el
+  momento actual (no hay que esperar a que acabe el día); se puede elegir
+  cualquier día anterior.
 
-### Almacenero
+### Almacenero (y admin en todo lo de aquí abajo)
 - **Recepción**: escanea el EAN del palet. Si no existe, rellena marca,
   modelo, amperaje, arranque en frío (CCA), tecnología (normal/AGM/EFB), si
   es especial y motivo. Si el modelo ya existía, también puedes tocar
   **Editar** ahí mismo para corregir sus datos antes de dar entrada. Luego
   indica la empresa distribuidora y la cantidad → se suma al stock del
-  almacén.
+  almacén. También puedes marcar que la recepción **es la devolución de un
+  préstamo** (en vez de dar de alta stock nuevo): buscas el préstamo activo
+  por quién lo tiene o por la batería, e indicas cuánto se devuelve.
 - **Entregar a conductor**: arma un pedido escaneando una o varias
-  baterías (con las cantidades que quiera) y lo envía a un conductor. El
-  stock del almacén **no se descuenta todavía** — el conductor tiene que
-  aceptar el pedido desde su móvil para que se mueva el stock (o rechazarlo,
-  y entonces no se mueve nada). Mientras el pedido siga pendiente, puedes
-  **deshacerlo** desde "Pedidos pendientes" (no se ha movido nada todavía).
+  baterías y lo envía a un conductor. El stock del almacén **no se
+  descuenta todavía** — el conductor tiene que aceptar el pedido desde su
+  móvil para que se mueva el stock (o rechazarlo, y no se mueve nada).
+- **Pedidos de conductores**: aquí llegan tanto los que tú preparas como
+  los que el conductor **solicita** él mismo (quedan "por preparar" hasta
+  que tú los revisas — puedes editar modelos y cantidades, por ejemplo si
+  pidió algo que no existe en el catálogo — y los envías). Se actualiza al
+  instante (Realtime) en cuanto el conductor responde, y siempre puedes
+  **ver los detalles** completos de cualquier pedido. Mientras un pedido
+  siga pendiente (por preparar o ya enviado sin responder), puedes
+  **deshacerlo**. Si un conductor **rechaza** un pedido, te salta al
+  instante un aviso emergente hasta que lo marques como visto.
+- **Pedidos comerciales**: los que ha solicitado admin/comercial para una
+  empresa o taller. Los preparas (puedes editar modelos/cantidades) y les
+  **das salida** — ahí es cuando de verdad se descuenta el almacén y queda
+  registrada la salida. Sin factura: es solo un registro de qué salió,
+  cuándo y para quién.
+- **Salidas de almacén**: todas las salidas ya dadas, con filtro por
+  empresa y por fecha, y el detalle completo de cada una.
+- **Préstamos**: sacan baterías del almacén sin ser una venta. Registra a
+  quién se le presta y cuánto; cuando te las devuelvan, registra la
+  devolución (total o parcial) desde aquí o marcándolo en Recepción — en
+  ambos casos repone el stock del almacén.
 - **Venta directa de almacén**: vende a un cliente particular directamente
-  desde el stock del almacén central (no tiene nada que ver con la venta
-  comercial). Funciona igual que la venta de un conductor: matrícula del
-  coche, si se lleva la batería vieja, origen (particular/web/Mapfre), y
-  opción de marcarla como garantía.
+  desde el stock del almacén central (no tiene nada que ver con los
+  pedidos comerciales). Igual que la venta de un conductor: matrícula del
+  coche, si se lleva la batería vieja (con motivo obligatorio si no la
+  lleva), origen (particular/web/Mapfre), y opción de marcarla como
+  garantía.
 - **Devoluciones**: registra devoluciones simples (vuelven al stock
   vendible) o de garantía (van a un almacén de garantías aparte, sin
-  mezclarse con lo que se puede vender). El proceso de escaneo funciona
-  igual que en Recepción: la batería devuelta NO tiene que salir de ningún
-  stock existente — si su EAN no está en el catálogo, se da de alta ahí
-  mismo. Puede venir de un conductor (se le resta de su stock) o
-  directamente de un cliente/taller (no resta de ningún sitio, solo suma).
-- **Modelos de producto**: catálogo de baterías, con edición y eliminación
-  (si el modelo ya tiene movimientos, se desactiva en vez de borrarse, para
-  no perder el histórico).
+  mezclarse con lo que se puede vender), con observaciones para detallar el
+  motivo. El proceso de escaneo funciona igual que en Recepción: si el EAN
+  no está en el catálogo, se da de alta ahí mismo. Puede venir de un
+  conductor (se le resta de su stock) o directamente de un cliente/taller.
+- **Modelos de producto**: catálogo de baterías, con edición y eliminación.
 - **Distribuidores**: alta, edición y eliminación de empresas suministradoras.
-- También puede hacer **venta comercial** (ver más abajo).
 
 ### Conductor / Vendedor
 - En cuanto tiene un pedido sin responder, le aparece **al instante** un
   aviso a pantalla completa que no se puede cerrar hasta que lo acepte o lo
-  rechace (salta en cualquier pantalla de la app, no hace falta que entre a
-  "Pedidos"). Usa Supabase Realtime, no un sondeo lento.
-- **Pedidos**: los pedidos que le prepara el almacén aparecen aquí
-  pendientes de respuesta. Al aceptar, las baterías pasan a su stock; al
-  rechazar, no se mueve nada.
+  rechace (salta en cualquier pantalla de la app). Usa Supabase Realtime.
+- **Pedidos**: lo que el almacén le prepara (para aceptar/rechazar) y lo
+  que él mismo ha solicitado (a la espera de que lo preparen, cancelable
+  mientras tanto). Siempre puede **ver los detalles** de cualquier pedido.
+- **Solicitar pedido**: pide él mismo lo que necesita escaneando modelos y
+  cantidades. Le llega al almacén como "por preparar"; cuando lo procesen y
+  envíen, le aparecerá para aceptar/rechazar como cualquier otro pedido.
 - **Vender**: escanea la batería y cobra en efectivo y/o tarjeta. Pide
-  también la matrícula del coche del cliente y si entrega la batería vieja.
-  Puede marcar la venta como **garantía**: en ese caso el cobro es 0 €,
-  salvo que el cliente suba de gama, en cuyo caso solo se cobra (en
-  efectivo o tarjeta) la diferencia.
+  también la matrícula del coche del cliente y si entrega la batería vieja
+  — si no la entrega, hay que indicar el motivo. Puede marcar la venta como
+  **garantía**: el cobro es 0 €, salvo que el cliente suba de gama, en cuyo
+  caso solo se cobra (efectivo o tarjeta) la diferencia.
 - **Mi stock**: qué lleva y cuánto.
 - **Mi caja**: saldo actual (efectivo y tarjeta por separado) y
   movimientos. Solo un administrador puede reiniciarla a cero.
 
-### Comercial (y también admin/almacenero)
-- **Venta comercial**: escanea todos los productos de la venta a una
-  empresa o taller → se genera una factura en **borrador con los precios en
-  blanco**. Es un canal totalmente distinto a la venta directa de almacén:
-  esta es siempre por transferencia y con factura.
-- **Facturas**: rellena el precio de cada línea y emite la factura (se
-  calculan automáticamente subtotal, IVA y total).
+### Comercial (y también admin)
+- **Nuevo pedido comercial**: pide baterías (uno o varios modelos, con sus
+  cantidades) para una empresa o taller. No mueve stock — es una solicitud
+  que el almacén tiene que preparar y a la que dar salida. No hay factura:
+  el registro de la operación es la propia salida de almacén.
 - **Ventas comerciales** (gestión de clientes): alta, edición y baja de las
-  empresas/talleres a los que se les puede vender.
+  empresas/talleres a los que se les puede pedir.
+- También puede consultar **Salidas de almacén**, con los mismos filtros
+  por empresa y fecha que ve el almacenero.
 
 ---
 
