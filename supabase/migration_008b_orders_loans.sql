@@ -509,7 +509,7 @@ begin
 
   update loans
     set quantity_returned = quantity_returned + p_quantity,
-        status = case when quantity_returned + p_quantity >= quantity then 'devuelto' else 'parcial' end
+        status = (case when quantity_returned + p_quantity >= quantity then 'devuelto' else 'parcial' end)::loan_status
     where id = p_loan_id;
 
   insert into stock_movements(movement_type, product_model_id, quantity, from_location, to_location, reference_table, reference_id, performed_by)

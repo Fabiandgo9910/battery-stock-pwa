@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
+import QuantityInput from '@/components/QuantityInput';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import type { ProductModel } from '@/types/domain';
@@ -27,6 +28,7 @@ export default function VentaDirectaAlmacenPage() {
   const [saleOrigin, setSaleOrigin] = useState<SaleOrigin>('particular');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [photosChecked, setPhotosChecked] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -71,6 +73,7 @@ export default function VentaDirectaAlmacenPage() {
     setVehiclePlate('');
     setOldBatteryReturned('');
     setOldBatteryReason('');
+    setPhotosChecked(false);
     setSaleOrigin('particular');
   }
 
@@ -99,6 +102,10 @@ export default function VentaDirectaAlmacenPage() {
     }
     if (oldBatteryReturned === 'no' && !oldBatteryReason.trim()) {
       toast.error('Indica el motivo por el que no entrega la batería vieja.');
+      return;
+    }
+    if (!photosChecked) {
+      toast.error('Marca la casilla de fotos antes de continuar.');
       return;
     }
     setSubmitting(true);
@@ -155,13 +162,11 @@ export default function VentaDirectaAlmacenPage() {
 
             <div className="mt-4">
               <label className="label-field">Cantidad</label>
-              <input
-                type="number"
-                min={0}
+              <QuantityInput
+                value={quantity}
+                onChange={setQuantity}
                 max={availableStock ?? undefined}
                 className="input-field text-lg font-semibold"
-                value={quantity}
-                onChange={(e) => setQuantity(Number(e.target.value))}
               />
             </div>
 
@@ -262,6 +267,16 @@ export default function VentaDirectaAlmacenPage() {
               </p>
               <p className="text-2xl font-bold text-slate-900">{total.toFixed(2)} €</p>
             </div>
+
+            <label className="mt-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={photosChecked}
+                onChange={(e) => setPhotosChecked(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+              Fotos hechas
+            </label>
 
             <div className="mt-6 flex gap-3">
               <button className="btn-secondary flex-1" onClick={reset}>Cancelar</button>

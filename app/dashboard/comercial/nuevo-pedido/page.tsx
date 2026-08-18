@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import BarcodeScanner from '@/components/BarcodeScanner';
-import ErrorBoundary from '@/components/ErrorBoundary';
+import ModelPicker from '@/components/ModelPicker';
+import QuantityInput from '@/components/QuantityInput';
 import ConfirmModal from '@/components/ConfirmModal';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
@@ -23,7 +23,6 @@ export default function NuevoPedidoComercialPage() {
   const [pointsOfSale, setPointsOfSale] = useState<PosOption[]>([]);
   const [posId, setPosId] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [looking, setLooking] = useState(false);
   const [notes, setNotes] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -38,31 +37,16 @@ export default function NuevoPedidoComercialPage() {
     load();
   }, [supabase]);
 
-  async function handleScan(code: string) {
-    setLooking(true);
-    try {
-      const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
-      const json = await res.json();
-      if (!json.found) {
-        toast.error('Código no reconocido en el catálogo.');
-        return;
-      }
-      const model: ProductModel = json.product_model;
-      setCart((prev) => {
-        const existing = prev.find((i) => i.product_model.id === model.id);
-        if (existing) {
-          return prev.map((i) => (i.product_model.id === model.id ? { ...i, quantity: i.quantity + 1 } : i));
-        }
-        return [...prev, { product_model: model, quantity: 1 }];
-      });
-      toast.success(`${model.brand} ${model.model_name} añadido`);
-    } finally {
-      setLooking(false);
+  function handleSelect(model: ProductModel) {
+    if (cart.some((i) => i.product_model.id === model.id)) {
+      toast('Ese modelo ya está en el pedido, ajusta su cantidad abajo.');
+      return;
     }
+    setCart((prev) => [...prev, { product_model: model, quantity: 0 }]);
   }
 
   function updateQty(id: string, qty: number) {
-    setCart((prev) => prev.map((i) => (i.product_model.id === id ? { ...i, quantity: Math.max(1, qty) } : i)));
+    setCart((prev) => prev.map((i) => (i.product_model.id === id ? { ...i, quantity: qty } : i)));
   }
   function removeItem(id: string) {
     setCart((prev) => prev.filter((i) => i.product_model.id !== id));
@@ -78,6 +62,11 @@ export default function NuevoPedidoComercialPage() {
       toast.error('Selecciona la empresa o taller.');
       return;
     }
+    const items = cart.filter((i) => i.quantity > 0);
+    if (items.length === 0) {
+      toast.error('Añade al menos una batería con cantidad mayor que 0.');
+      return;
+    }
     setSubmitting(true);
     const res = await fetch('/api/commercial-orders', {
       method: 'POST',
@@ -85,7 +74,7 @@ export default function NuevoPedidoComercialPage() {
       body: JSON.stringify({
         point_of_sale_id: posId,
         warehouse_id: warehouseId,
-        items: cart.map((i) => ({ product_model_id: i.product_model.id, quantity: i.quantity })),
+        items: items.map((i) => ({ product_model_id: i.product_model.id, quantity: i.quantity })),
         notes: notes || undefined,
       }),
     });
@@ -100,12 +89,14 @@ export default function NuevoPedidoComercialPage() {
     reset();
   }
 
+  const readyItems = cart.filter((i) => i.quantity > 0);
+
   return (
     <div className="mx-auto max-w-lg">
       <h1 className="text-2xl font-semibold text-slate-900">Nuevo pedido comercial</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Pide baterías para una empresa o taller. Esto no mueve stock todavía — el almacén lo prepara
-        y le da salida (ahí es cuando se descuenta de verdad y queda registrado).
+        Pide baterías para una empresa o taller buscando por referencia. Esto no mueve stock
+        todavía — el almacén lo prepara y le da salida.
       </p>
 
       <div className="card mt-6">
@@ -117,10 +108,7 @@ export default function NuevoPedidoComercialPage() {
           ))}
         </select>
 
-        <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
-          <BarcodeScanner active onScan={handleScan} />
-        </ErrorBoundary>
-        {looking && <p className="mt-2 text-center text-sm text-charge-700">Buscando modelo…</p>}
+        <ModelPicker onSelect={handleSelect} />
       </div>
 
       {cart.length > 0 && (
@@ -131,12 +119,10 @@ export default function NuevoPedidoComercialPage() {
               <div key={item.product_model.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2">
                 <p className="text-sm font-medium text-slate-900">{item.product_model.brand} {item.product_model.model_name}</p>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm"
+                  <QuantityInput
                     value={item.quantity}
-                    onChange={(e) => updateQty(item.product_model.id, Number(e.target.value))}
+                    onChange={(qty) => updateQty(item.product_model.id, qty)}
+                    className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm"
                   />
                   <button onClick={() => removeItem(item.product_model.id)} className="text-xs text-red-600">
                     Quitar
@@ -159,7 +145,7 @@ export default function NuevoPedidoComercialPage() {
       <ConfirmModal
         open={confirmOpen}
         title="Confirmar pedido comercial"
-        description={`Se registrará un pedido con ${cart.length} modelo(s) para la empresa seleccionada, pendiente de que el almacén le dé salida.`}
+        description={`Se registrará un pedido con ${readyItems.length} modelo(s) para la empresa seleccionada, pendiente de que el almacén le dé salida.`}
         confirmLabel="Sí, enviar"
         loading={submitting}
         onConfirm={submit}

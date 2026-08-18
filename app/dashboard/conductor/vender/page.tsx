@@ -26,6 +26,13 @@ export default function VenderPage() {
   const [oldBatteryReturned, setOldBatteryReturned] = useState<'si' | 'no' | ''>('');
   const [oldBatteryReason, setOldBatteryReason] = useState('');
   const [saleOrigin, setSaleOrigin] = useState<SaleOrigin>('particular');
+  const [photoChecks, setPhotoChecks] = useState({
+    cuadro: false,
+    controlador: false,
+    viejaYNueva: false,
+    nuevaInstalada: false,
+    cobro: false,
+  });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -72,6 +79,7 @@ export default function VenderPage() {
     setOldBatteryReturned('');
     setOldBatteryReason('');
     setSaleOrigin('particular');
+    setPhotoChecks({ cuadro: false, controlador: false, viejaYNueva: false, nuevaInstalada: false, cobro: false });
   }
 
   const total = (Number(amountCash) || 0) + (Number(amountCard) || 0);
@@ -95,6 +103,10 @@ export default function VenderPage() {
     }
     if (oldBatteryReturned === 'no' && !oldBatteryReason.trim()) {
       toast.error('Indica el motivo por el que no entrega la batería vieja.');
+      return;
+    }
+    if (!Object.values(photoChecks).every(Boolean)) {
+      toast.error('Marca las 5 fotos antes de continuar (cuadro, controlador, vieja y nueva, nueva instalada, cobro).');
       return;
     }
     setSubmitting(true);
@@ -152,14 +164,12 @@ export default function VenderPage() {
             </div>
 
             <div className="mt-4">
-              <label className="label-field">Cantidad</label>
+              <label className="label-field">Cantidad (siempre 1 en venta de conductor)</label>
               <input
                 type="number"
-                min={1}
-                max={myStock ?? undefined}
-                className="input-field text-lg font-semibold"
-                value={quantity}
-                onChange={(e) => setQuantity(Number(e.target.value))}
+                value={1}
+                disabled
+                className="input-field text-lg font-semibold bg-slate-100 text-slate-500"
               />
             </div>
 
@@ -262,6 +272,27 @@ export default function VenderPage() {
               {isWarranty && total === 0 && (
                 <p className="mt-1 text-xs text-charge-700">Garantía sin coste para el cliente</p>
               )}
+            </div>
+
+            <div className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fotos tomadas</p>
+              {([
+                ['cuadro', 'Foto cuadro'],
+                ['controlador', 'Foto controlador'],
+                ['viejaYNueva', 'Foto vieja y nueva'],
+                ['nuevaInstalada', 'Foto de nueva instalada'],
+                ['cobro', 'Foto del cobro'],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={photoChecks[key]}
+                    onChange={(e) => setPhotoChecks((prev) => ({ ...prev, [key]: e.target.checked }))}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  {label}
+                </label>
+              ))}
             </div>
 
             <div className="mt-6 flex gap-3">

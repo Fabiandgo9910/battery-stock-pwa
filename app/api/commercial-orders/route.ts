@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('commercial_orders')
       .select(
-        '*, point_of_sale:points_of_sale(id, name), requested_by_profile:profiles!commercial_orders_requested_by_fkey(full_name), dispatched_by_profile:profiles!commercial_orders_dispatched_by_fkey(full_name), commercial_order_items(id, quantity, product_model:product_models(brand, model_name))'
+        '*, point_of_sale:points_of_sale(id, name), requested_by_profile:profiles!commercial_orders_requested_by_fkey(full_name), dispatched_by_profile:profiles!commercial_orders_dispatched_by_fkey(full_name), commercial_order_items(id, product_model_id, quantity, product_model:product_models(brand, model_name))'
       )
       .order('created_at', { ascending: false });
 

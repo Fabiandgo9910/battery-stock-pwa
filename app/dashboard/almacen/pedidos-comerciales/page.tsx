@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
 import ConfirmModal from '@/components/ConfirmModal';
-import BarcodeScanner from '@/components/BarcodeScanner';
-import ErrorBoundary from '@/components/ErrorBoundary';
+import ModelPicker from '@/components/ModelPicker';
+import QuantityInput from '@/components/QuantityInput';
 import toast from 'react-hot-toast';
 import type { ProductModel } from '@/types/domain';
 
@@ -15,6 +15,7 @@ interface OrderItem {
   quantity: number;
   product_model: { brand: string; model_name: string } | null;
 }
+
 interface Order {
   id: string;
   status: 'pending' | 'dispatched' | 'cancelled';
@@ -52,8 +53,8 @@ export default function PedidosComercialesPage() {
 
   const [processing, setProcessing] = useState<Order | null>(null);
   const [editItems, setEditItems] = useState<EditItem[]>([]);
-  const [looking, setLooking] = useState(false);
   const [dispatchConfirmOpen, setDispatchConfirmOpen] = useState(false);
+  const [photosChecked, setPhotosChecked] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -69,6 +70,7 @@ export default function PedidosComercialesPage() {
 
   function startProcessing(order: Order) {
     setProcessing(order);
+    setPhotosChecked(false);
     setEditItems(
       order.commercial_order_items.map((it) => ({
         product_model: { id: it.product_model_id, brand: it.product_model?.brand ?? '', model_name: it.product_model?.model_name ?? '' } as ProductModel,
@@ -77,30 +79,16 @@ export default function PedidosComercialesPage() {
     );
   }
 
-  async function handleScan(code: string) {
-    setLooking(true);
-    try {
-      const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
-      const json = await res.json();
-      if (!json.found) {
-        toast.error('Código no reconocido. Dalo de alta en Recepción primero.');
-        return;
-      }
-      const model: ProductModel = json.product_model;
-      setEditItems((prev) => {
-        const existing = prev.find((i) => i.product_model.id === model.id);
-        if (existing) {
-          return prev.map((i) => (i.product_model.id === model.id ? { ...i, quantity: i.quantity + 1 } : i));
-        }
-        return [...prev, { product_model: model, quantity: 1 }];
-      });
-    } finally {
-      setLooking(false);
+  function handleSelect(model: ProductModel) {
+    if (editItems.some((i) => i.product_model.id === model.id)) {
+      toast('Ese modelo ya está en el pedido, ajusta su cantidad abajo.');
+      return;
     }
+    setEditItems((prev) => [...prev, { product_model: model, quantity: 0 }]);
   }
 
   function updateQty(id: string, qty: number) {
-    setEditItems((prev) => prev.map((i) => (i.product_model.id === id ? { ...i, quantity: Math.max(0, qty) } : i)));
+    setEditItems((prev) => prev.map((i) => (i.product_model.id === id ? { ...i, quantity: qty } : i)));
   }
   function removeItem(id: string) {
     setEditItems((prev) => prev.filter((i) => i.product_model.id !== id));
@@ -232,25 +220,21 @@ export default function PedidosComercialesPage() {
               Preparar salida para {processing.point_of_sale?.name}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Edita cantidades o escanea para añadir un modelo que no estuviera en el pedido original.
+              Edita cantidades o busca por referencia para añadir un modelo que no estuviera en el
+              pedido original.
             </p>
             <div className="mt-4">
-              <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara.">
-                <BarcodeScanner active onScan={handleScan} />
-              </ErrorBoundary>
-              {looking && <p className="mt-2 text-center text-sm text-charge-700">Buscando modelo…</p>}
+              <ModelPicker onSelect={handleSelect} />
             </div>
             <div className="mt-4 space-y-2">
               {editItems.map((item) => (
                 <div key={item.product_model.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2">
                   <p className="text-sm font-medium text-slate-900">{item.product_model.brand} {item.product_model.model_name}</p>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm"
+                    <QuantityInput
                       value={item.quantity}
-                      onChange={(e) => updateQty(item.product_model.id, Number(e.target.value))}
+                      onChange={(qty) => updateQty(item.product_model.id, qty)}
+                      className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm"
                     />
                     <button onClick={() => removeItem(item.product_model.id)} className="text-xs text-red-600">
                       Quitar
@@ -260,9 +244,31 @@ export default function PedidosComercialesPage() {
               ))}
               {editItems.length === 0 && <p className="text-sm text-slate-400">Sin modelos todavía.</p>}
             </div>
+
+            <label className="mt-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={photosChecked}
+                onChange={(e) => setPhotosChecked(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+              Fotos hechas
+            </label>
+
             <div className="mt-6 flex gap-3">
               <button className="btn-secondary flex-1" onClick={() => setProcessing(null)}>Cancelar</button>
-              <button className="btn-charge flex-1" onClick={() => setDispatchConfirmOpen(true)}>Dar salida</button>
+              <button
+                className="btn-charge flex-1"
+                onClick={() => {
+                  if (!photosChecked) {
+                    toast.error('Marca la casilla de fotos antes de dar salida.');
+                    return;
+                  }
+                  setDispatchConfirmOpen(true);
+                }}
+              >
+                Dar salida
+              </button>
             </div>
           </div>
         </div>

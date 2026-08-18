@@ -62,6 +62,10 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
         el conductor, pedidos comerciales (pedido → salida de almacén, sin
         factura), préstamos, y el motivo obligatorio cuando no se recoge la
         batería vieja.
+     10. `supabase/migration_009_fixes_and_direct_delivery.sql` — corrige el
+        bug real de "la devolución de un préstamo da error" (mismo tipo de
+        problema que las devoluciones: un CASE sin cast a un enum), y añade
+        la entrega directa a una empresa desde la pantalla "Empresas".
 
      Ninguna borra datos de negocio. Los pasos 3 y 4 tienen que ir
      **separados** a propósito: `ALTER TYPE ... ADD VALUE` (paso 3) no puede
@@ -190,10 +194,11 @@ Acceso total a todo lo de abajo, más:
   almacén. También puedes marcar que la recepción **es la devolución de un
   préstamo** (en vez de dar de alta stock nuevo): buscas el préstamo activo
   por quién lo tiene o por la batería, e indicas cuánto se devuelve.
-- **Entregar a conductor**: arma un pedido escaneando una o varias
-  baterías y lo envía a un conductor. El stock del almacén **no se
-  descuenta todavía** — el conductor tiene que aceptar el pedido desde su
-  móvil para que se mueva el stock (o rechazarlo, y no se mueve nada).
+- **Entregar a conductor**: arma un pedido buscando por referencia (marca /
+  modelo, no hace falta escanear) y poniendo la cantidad, y lo envía a un
+  conductor. El stock del almacén **no se descuenta todavía** — el
+  conductor tiene que aceptar el pedido desde su móvil para que se mueva el
+  stock (o rechazarlo, y no se mueve nada).
 - **Pedidos de conductores**: aquí llegan tanto los que tú preparas como
   los que el conductor **solicita** él mismo (quedan "por preparar" hasta
   que tú los revisas — puedes editar modelos y cantidades, por ejemplo si
@@ -204,10 +209,11 @@ Acceso total a todo lo de abajo, más:
   **deshacerlo**. Si un conductor **rechaza** un pedido, te salta al
   instante un aviso emergente hasta que lo marques como visto.
 - **Pedidos comerciales**: los que ha solicitado admin/comercial para una
-  empresa o taller. Los preparas (puedes editar modelos/cantidades) y les
-  **das salida** — ahí es cuando de verdad se descuenta el almacén y queda
-  registrada la salida. Sin factura: es solo un registro de qué salió,
-  cuándo y para quién.
+  empresa o taller. Los preparas (puedes editar modelos/cantidades
+  buscando por referencia) y les **das salida** — ahí es cuando de verdad
+  se descuenta el almacén y queda registrada la salida. Tienes que marcar
+  la casilla de **fotos hechas** antes de poder confirmar. Sin factura: es
+  solo un registro de qué salió, cuándo y para quién.
 - **Salidas de almacén**: todas las salidas ya dadas, con filtro por
   empresa y por fecha, y el detalle completo de cada una.
 - **Préstamos**: sacan baterías del almacén sin ser una venta. Registra a
@@ -218,8 +224,8 @@ Acceso total a todo lo de abajo, más:
   desde el stock del almacén central (no tiene nada que ver con los
   pedidos comerciales). Igual que la venta de un conductor: matrícula del
   coche, si se lleva la batería vieja (con motivo obligatorio si no la
-  lleva), origen (particular/web/Mapfre), y opción de marcarla como
-  garantía.
+  lleva), origen (particular/web/Mapfre), opción de marcarla como
+  garantía, y la casilla de **fotos hechas** obligatoria para poder cobrar.
 - **Devoluciones**: registra devoluciones simples (vuelven al stock
   vendible) o de garantía (van a un almacén de garantías aparte, sin
   mezclarse con lo que se puede vender), con observaciones para detallar el
@@ -236,12 +242,16 @@ Acceso total a todo lo de abajo, más:
 - **Pedidos**: lo que el almacén le prepara (para aceptar/rechazar) y lo
   que él mismo ha solicitado (a la espera de que lo preparen, cancelable
   mientras tanto). Siempre puede **ver los detalles** de cualquier pedido.
-- **Solicitar pedido**: pide él mismo lo que necesita escaneando modelos y
-  cantidades. Le llega al almacén como "por preparar"; cuando lo procesen y
-  envíen, le aparecerá para aceptar/rechazar como cualquier otro pedido.
-- **Vender**: escanea la batería y cobra en efectivo y/o tarjeta. Pide
-  también la matrícula del coche del cliente y si entrega la batería vieja
-  — si no la entrega, hay que indicar el motivo. Puede marcar la venta como
+- **Solicitar pedido**: pide él mismo lo que necesita buscando por
+  referencia (marca/modelo, sin escanear) y poniendo la cantidad. Le llega
+  al almacén como "por preparar"; cuando lo procesen y envíen, le
+  aparecerá para aceptar/rechazar como cualquier otro pedido.
+- **Vender**: escanea la batería (aquí sí, porque es una unidad física
+  concreta) y cobra en efectivo y/o tarjeta — la cantidad siempre es 1,
+  no editable. Pide también la matrícula del coche del cliente y si
+  entrega la batería vieja — si no la entrega, hay que indicar el motivo.
+  Antes de cobrar hay que marcar 5 casillas de fotos (cuadro, controlador,
+  vieja y nueva, nueva instalada, cobro). Puede marcar la venta como
   **garantía**: el cobro es 0 €, salvo que el cliente suba de gama, en cuyo
   caso solo se cobra (efectivo o tarjeta) la diferencia.
 - **Mi stock**: qué lleva y cuánto.
@@ -250,11 +260,16 @@ Acceso total a todo lo de abajo, más:
 
 ### Comercial (y también admin)
 - **Nuevo pedido comercial**: pide baterías (uno o varios modelos, con sus
-  cantidades) para una empresa o taller. No mueve stock — es una solicitud
-  que el almacén tiene que preparar y a la que dar salida. No hay factura:
-  el registro de la operación es la propia salida de almacén.
-- **Ventas comerciales** (gestión de clientes): alta, edición y baja de las
-  empresas/talleres a los que se les puede pedir.
+  cantidades, buscando por referencia sin escanear) para una empresa o
+  taller. No mueve stock — es una solicitud que el almacén tiene que
+  preparar y a la que dar salida. No hay factura: el registro de la
+  operación es la propia salida de almacén.
+- **Empresas** (antes "Ventas comerciales"): alta, edición y baja de las
+  empresas/talleres a los que se les puede pedir. Admin y almacenero
+  también pueden, desde aquí, hacer una **entrega directa**: salta el
+  circuito de "pedido pendiente → dar salida" y descuenta el almacén al
+  momento para una empresa concreta (también con la casilla de fotos
+  obligatoria).
 - También puede consultar **Salidas de almacén**, con los mismos filtros
   por empresa y fecha que ve el almacenero.
 

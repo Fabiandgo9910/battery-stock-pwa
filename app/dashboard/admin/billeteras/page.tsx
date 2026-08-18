@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import QuantityInput from '@/components/QuantityInput';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
@@ -238,13 +239,11 @@ export default function BilleterasAdminPage() {
             </p>
             <div className="mt-4">
               <label className="label-field">Cantidad a retirar (disponible: {reclaimTarget.stock.quantity})</label>
-              <input
-                type="number"
-                min={0}
+              <QuantityInput
+                value={reclaimQty}
+                onChange={setReclaimQty}
                 max={reclaimTarget.stock.quantity}
                 className="input-field text-lg font-semibold"
-                value={reclaimQty}
-                onChange={(e) => setReclaimQty(Number(e.target.value))}
               />
             </div>
             <div className="mt-6 flex gap-3">

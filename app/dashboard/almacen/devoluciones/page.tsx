@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
+import QuantityInput from '@/components/QuantityInput';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
@@ -312,13 +313,7 @@ export default function DevolucionesPage() {
             </div>
             <div className="mt-4">
               <label className="label-field">Cantidad</label>
-              <input
-                type="number"
-                min={0}
-                className="input-field text-lg font-semibold"
-                value={quantity}
-                onChange={(e) => setQuantity(Number(e.target.value))}
-              />
+              <QuantityInput value={quantity} onChange={setQuantity} className="input-field text-lg font-semibold" />
             </div>
             <div className="mt-4">
               <label className="label-field">Observaciones</label>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
+import QuantityInput from '@/components/QuantityInput';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
 import toast from 'react-hot-toast';
@@ -179,13 +180,7 @@ export default function PrestamosPage() {
               <div className="mt-4 space-y-4">
                 <div>
                   <label className="label-field">Cantidad</label>
-                  <input
-                    type="number"
-                    min={0}
-                    className="input-field text-lg font-semibold"
-                    value={quantity}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
-                  />
+                  <QuantityInput value={quantity} onChange={setQuantity} className="input-field text-lg font-semibold" />
                 </div>
                 <div>
                   <label className="label-field">¿A quién se le presta? *</label>
@@ -287,13 +282,11 @@ export default function PrestamosPage() {
               <label className="label-field">
                 Cantidad devuelta (pendiente: {returnTarget.quantity - returnTarget.quantity_returned})
               </label>
-              <input
-                type="number"
-                min={0}
+              <QuantityInput
+                value={returnQty}
+                onChange={setReturnQty}
                 max={returnTarget.quantity - returnTarget.quantity_returned}
                 className="input-field text-lg font-semibold"
-                value={returnQty}
-                onChange={(e) => setReturnQty(Number(e.target.value))}
               />
             </div>
             <div className="mt-4">

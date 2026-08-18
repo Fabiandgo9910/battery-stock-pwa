@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import BarcodeScanner from '@/components/BarcodeScanner';
-import ErrorBoundary from '@/components/ErrorBoundary';
+import ModelPicker from '@/components/ModelPicker';
+import QuantityInput from '@/components/QuantityInput';
 import ConfirmModal from '@/components/ConfirmModal';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
@@ -20,7 +20,6 @@ export default function EntregaConductorPage() {
   const [driverId, setDriverId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [looking, setLooking] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -34,41 +33,23 @@ export default function EntregaConductorPage() {
     load();
   }, [supabase]);
 
-  async function handleScan(code: string) {
-    setLooking(true);
-    try {
-      const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
-      const json = await res.json();
-      if (!json.found) {
-        toast.error('Este código no está registrado en el catálogo. Debes darlo de alta primero en Recepción.');
-        return;
-      }
-      const model: ProductModel = json.product_model;
-      const { data: stock } = await supabase
-        .from('warehouse_stock')
-        .select('quantity')
-        .eq('warehouse_id', warehouseId)
-        .eq('product_model_id', model.id)
-        .maybeSingle();
-      const available = stock?.quantity ?? 0;
-
-      setCart((prev) => {
-        const existing = prev.find((i) => i.product_model.id === model.id);
-        if (existing) {
-          return prev.map((i) =>
-            i.product_model.id === model.id ? { ...i, quantity: Math.min(i.quantity + 1, available) } : i
-          );
-        }
-        return [...prev, { product_model: model, quantity: available > 0 ? 1 : 0, available }];
-      });
-      toast.success(`${model.brand} ${model.model_name} añadido al pedido`);
-    } finally {
-      setLooking(false);
+  async function handleSelect(model: ProductModel) {
+    if (cart.some((i) => i.product_model.id === model.id)) {
+      toast('Ese modelo ya está en el pedido, ajusta su cantidad abajo.');
+      return;
     }
+    const { data: stock } = await supabase
+      .from('warehouse_stock')
+      .select('quantity')
+      .eq('warehouse_id', warehouseId)
+      .eq('product_model_id', model.id)
+      .maybeSingle();
+    const available = stock?.quantity ?? 0;
+    setCart((prev) => [...prev, { product_model: model, quantity: 0, available }]);
   }
 
   function updateQty(id: string, qty: number) {
-    setCart((prev) => prev.map((i) => (i.product_model.id === id ? { ...i, quantity: Math.max(1, Math.min(qty, i.available)) } : i)));
+    setCart((prev) => prev.map((i) => (i.product_model.id === id ? { ...i, quantity: qty } : i)));
   }
   function removeItem(id: string) {
     setCart((prev) => prev.filter((i) => i.product_model.id !== id));
@@ -83,6 +64,16 @@ export default function EntregaConductorPage() {
       toast.error('Selecciona un conductor.');
       return;
     }
+    const items = cart.filter((i) => i.quantity > 0);
+    if (items.length === 0) {
+      toast.error('Añade al menos una batería con cantidad mayor que 0.');
+      return;
+    }
+    const overLimit = items.find((i) => i.quantity > i.available);
+    if (overLimit) {
+      toast.error(`No hay suficiente stock de ${overLimit.product_model.brand} ${overLimit.product_model.model_name} (disponible: ${overLimit.available}).`);
+      return;
+    }
     setSubmitting(true);
     const res = await fetch('/api/driver-orders', {
       method: 'POST',
@@ -90,7 +81,7 @@ export default function EntregaConductorPage() {
       body: JSON.stringify({
         warehouse_id: warehouseId,
         driver_id: driverId,
-        items: cart.map((i) => ({ product_model_id: i.product_model.id, quantity: i.quantity })),
+        items: items.map((i) => ({ product_model_id: i.product_model.id, quantity: i.quantity })),
       }),
     });
     const json = await res.json();
@@ -105,13 +96,14 @@ export default function EntregaConductorPage() {
   }
 
   const driverName = drivers.find((d) => d.id === driverId)?.full_name;
+  const readyItems = cart.filter((i) => i.quantity > 0);
 
   return (
     <div className="mx-auto max-w-lg">
       <h1 className="text-2xl font-semibold text-slate-900">Entregar stock a conductor</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Escanea una o varias baterías para armar el pedido. El conductor tendrá que aceptarlo desde
-        su móvil; el stock no se mueve hasta que lo acepte.
+        Busca por referencia y pon la cantidad — no hace falta escanear. El conductor tendrá que
+        aceptarlo desde su móvil; el stock no se mueve hasta que lo acepte.
       </p>
 
       <div className="card mt-6">
@@ -123,12 +115,7 @@ export default function EntregaConductorPage() {
           ))}
         </select>
 
-        <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
-          <BarcodeScanner active onScan={handleScan} />
-        </ErrorBoundary>
-        {looking && (
-          <p className="mt-2 text-center text-sm text-charge-700">Buscando modelo…</p>
-        )}
+        <ModelPicker onSelect={handleSelect} />
       </div>
 
       {cart.length > 0 && (
@@ -144,13 +131,11 @@ export default function EntregaConductorPage() {
                   <p className="text-xs text-slate-400">Disponible en almacén: {item.available}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={1}
+                  <QuantityInput
+                    value={item.quantity}
+                    onChange={(qty) => updateQty(item.product_model.id, qty)}
                     max={item.available}
                     className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm"
-                    value={item.quantity}
-                    onChange={(e) => updateQty(item.product_model.id, Number(e.target.value))}
                   />
                   <button onClick={() => removeItem(item.product_model.id)} className="text-xs text-red-600">
                     Quitar
@@ -169,7 +154,7 @@ export default function EntregaConductorPage() {
       <ConfirmModal
         open={confirmOpen}
         title="Enviar pedido al conductor"
-        description={`Se enviará un pedido con ${cart.length} modelo(s) a ${driverName ?? 'el conductor seleccionado'}. El stock del almacén se descontará solo cuando lo acepte.`}
+        description={`Se enviará un pedido con ${readyItems.length} modelo(s) a ${driverName ?? 'el conductor seleccionado'}. El stock del almacén se descontará solo cuando lo acepte.`}
         confirmLabel="Sí, enviar"
         loading={submitting}
         onConfirm={submit}

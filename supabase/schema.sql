@@ -1140,6 +1140,59 @@ begin
 end;
 $$ language plpgsql security definer;
 
+-- 7d-bis) ENTREGA DIRECTA A UNA EMPRESA: crea el pedido y le da salida en el
+-- mismo paso (admin/almacenero) — para cuando no hace falta el circuito
+-- completo de "pedido pendiente -> procesar -> dar salida".
+create or replace function fn_direct_commercial_delivery(
+  p_point_of_sale_id uuid,
+  p_warehouse_id uuid,
+  p_items jsonb, -- [{"product_model_id": "...", "quantity": n}, ...]
+  p_notes text default null
+) returns uuid as $$
+declare
+  v_order_id uuid;
+  v_user uuid := auth.uid();
+  v_role user_role;
+  v_item jsonb;
+  v_current_stock integer;
+begin
+  select role into v_role from profiles where id = v_user;
+  if v_role is distinct from 'admin' and v_role is distinct from 'almacenero' then
+    raise exception 'Solo el almacén o un administrador pueden hacer una entrega directa';
+  end if;
+
+  if jsonb_array_length(p_items) = 0 then
+    raise exception 'La entrega no puede estar vacía';
+  end if;
+
+  insert into commercial_orders(point_of_sale_id, warehouse_id, requested_by, dispatched_by, notes, status, dispatched_at)
+  values (p_point_of_sale_id, p_warehouse_id, v_user, v_user, p_notes, 'dispatched', now())
+  returning id into v_order_id;
+
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    select quantity into v_current_stock from warehouse_stock
+      where warehouse_id = p_warehouse_id and product_model_id = (v_item->>'product_model_id')::uuid
+      for update;
+
+    if v_current_stock is null or v_current_stock < (v_item->>'quantity')::integer then
+      raise exception 'Stock insuficiente para el modelo %', v_item->>'product_model_id';
+    end if;
+
+    update warehouse_stock set quantity = quantity - (v_item->>'quantity')::integer, updated_at = now()
+      where warehouse_id = p_warehouse_id and product_model_id = (v_item->>'product_model_id')::uuid;
+
+    insert into commercial_order_items(order_id, product_model_id, quantity)
+    values (v_order_id, (v_item->>'product_model_id')::uuid, (v_item->>'quantity')::integer);
+
+    insert into stock_movements(movement_type, product_model_id, quantity, from_location, to_location, reference_table, reference_id, performed_by)
+    values ('sale_commercial', (v_item->>'product_model_id')::uuid, -(v_item->>'quantity')::integer, 'warehouse', 'commercial_order', 'commercial_orders', v_order_id, v_user);
+  end loop;
+
+  return v_order_id;
+end;
+$$ language plpgsql security definer;
+
 -- 7e) PRÉSTAMOS: sale del almacén sin ser una venta (admin/almacenero)
 create or replace function fn_create_loan(
   p_product_model_id uuid,
@@ -1240,7 +1293,7 @@ begin
 
   update loans
     set quantity_returned = quantity_returned + p_quantity,
-        status = case when quantity_returned + p_quantity >= quantity then 'devuelto' else 'parcial' end
+        status = (case when quantity_returned + p_quantity >= quantity then 'devuelto' else 'parcial' end)::loan_status
     where id = p_loan_id;
 
   insert into stock_movements(movement_type, product_model_id, quantity, from_location, to_location, reference_table, reference_id, performed_by)

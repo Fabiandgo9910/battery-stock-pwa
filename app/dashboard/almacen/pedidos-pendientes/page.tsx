@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
 import ConfirmModal from '@/components/ConfirmModal';
-import BarcodeScanner from '@/components/BarcodeScanner';
-import ErrorBoundary from '@/components/ErrorBoundary';
+import ModelPicker from '@/components/ModelPicker';
+import QuantityInput from '@/components/QuantityInput';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import type { ProductModel } from '@/types/domain';
@@ -57,7 +57,7 @@ export default function PedidosPendientesPage() {
   const [processing, setProcessing] = useState<Order | null>(null);
   const [editItems, setEditItems] = useState<EditItem[]>([]);
   const [editNotes, setEditNotes] = useState('');
-  const [looking, setLooking] = useState(false);
+
 
   async function load() {
     setLoading(true);
@@ -106,30 +106,16 @@ export default function PedidosPendientesPage() {
     setEditNotes(order.notes ?? '');
   }
 
-  async function handleScanForProcessing(code: string) {
-    setLooking(true);
-    try {
-      const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
-      const json = await res.json();
-      if (!json.found) {
-        toast.error('Código no reconocido en el catálogo. Dalo de alta primero en Recepción.');
-        return;
-      }
-      const model: ProductModel = json.product_model;
-      setEditItems((prev) => {
-        const existing = prev.find((i) => i.product_model.id === model.id);
-        if (existing) {
-          return prev.map((i) => (i.product_model.id === model.id ? { ...i, quantity: i.quantity + 1 } : i));
-        }
-        return [...prev, { product_model: model, quantity: 1 }];
-      });
-    } finally {
-      setLooking(false);
+  function handleSelectForProcessing(model: ProductModel) {
+    if (editItems.some((i) => i.product_model.id === model.id)) {
+      toast('Ese modelo ya está en el pedido, ajusta su cantidad abajo.');
+      return;
     }
+    setEditItems((prev) => [...prev, { product_model: model, quantity: 0 }]);
   }
 
   function updateEditQty(id: string, qty: number) {
-    setEditItems((prev) => prev.map((i) => (i.product_model.id === id ? { ...i, quantity: Math.max(0, qty) } : i)));
+    setEditItems((prev) => prev.map((i) => (i.product_model.id === id ? { ...i, quantity: qty } : i)));
   }
   function removeEditItem(id: string) {
     setEditItems((prev) => prev.filter((i) => i.product_model.id !== id));
@@ -279,15 +265,12 @@ export default function PedidosPendientesPage() {
               Preparar pedido de {processing.driver?.full_name}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Edita cantidades, quita lo que no haya, o escanea para añadir otro modelo (por ejemplo
-              si el conductor pidió uno que no existía en el catálogo).
+              Edita cantidades, quita lo que no haya, o busca por referencia para añadir otro
+              modelo (por ejemplo si el conductor pidió uno que no existía en el catálogo).
             </p>
 
             <div className="mt-4">
-              <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara.">
-                <BarcodeScanner active onScan={handleScanForProcessing} />
-              </ErrorBoundary>
-              {looking && <p className="mt-2 text-center text-sm text-charge-700">Buscando modelo…</p>}
+              <ModelPicker onSelect={handleSelectForProcessing} />
             </div>
 
             <div className="mt-4 space-y-2">
@@ -295,12 +278,10 @@ export default function PedidosPendientesPage() {
                 <div key={item.product_model.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2">
                   <p className="text-sm font-medium text-slate-900">{item.product_model.brand} {item.product_model.model_name}</p>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm"
+                    <QuantityInput
                       value={item.quantity}
-                      onChange={(e) => updateEditQty(item.product_model.id, Number(e.target.value))}
+                      onChange={(qty) => updateEditQty(item.product_model.id, qty)}
+                      className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm"
                     />
                     <button onClick={() => removeEditItem(item.product_model.id)} className="text-xs text-red-600">
                       Quitar

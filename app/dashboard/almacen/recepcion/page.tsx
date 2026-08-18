@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
+import QuantityInput from '@/components/QuantityInput';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import type { ProductModel, Supplier } from '@/types/domain';
@@ -319,13 +320,11 @@ export default function RecepcionPage() {
                 <label className="label-field">
                   Cantidad devuelta (pendiente: {selectedLoan.quantity - selectedLoan.quantity_returned})
                 </label>
-                <input
-                  type="number"
-                  min={0}
+                <QuantityInput
+                  value={loanReturnQty}
+                  onChange={setLoanReturnQty}
                   max={selectedLoan.quantity - selectedLoan.quantity_returned}
                   className="input-field text-lg font-semibold"
-                  value={loanReturnQty}
-                  onChange={(e) => setLoanReturnQty(Number(e.target.value))}
                 />
               </div>
               <div className="mt-4">
@@ -475,13 +474,7 @@ export default function RecepcionPage() {
             </div>
             <div>
               <label className="label-field">Cantidad recibida *</label>
-              <input
-                type="number"
-                min={0}
-                className="input-field text-lg font-semibold"
-                value={quantity}
-                onChange={(e) => setQuantity(Number(e.target.value))}
-              />
+              <QuantityInput value={quantity} onChange={setQuantity} className="input-field text-lg font-semibold" />
             </div>
             <div>
               <label className="label-field">Notas (opcional)</label>
