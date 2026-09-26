@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { useServerPagination, type ServerPageResult } from '@/hooks/useServerPagination';
 import toast from 'react-hot-toast';
 import type { Profile, UserRole } from '@/types/domain';
 
@@ -12,13 +14,22 @@ const ROLE_LABEL: Record<UserRole, string> = {
   comercial: 'Comercial',
 };
 
+async function fetchUsersPage(
+  { page, pageSize, search }: { page: number; pageSize: number; search: string },
+  signal: AbortSignal
+): Promise<ServerPageResult<Profile>> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (search) params.set('search', search);
+  const res = await fetch(`/api/users?${params.toString()}`, { signal });
+  const json = await res.json();
+  return { items: json.users ?? [], total: json.total ?? 0 };
+}
+
 export default function UsuariosPage() {
-  const [users, setUsers] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { page, setPage, search, setSearch, items: users, total, loading, reload } = useServerPagination(fetchUsersPage, { pageSize: 10 });
   const [showForm, setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState<Profile | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [toDeactivate, setToDeactivate] = useState<Profile | null>(null);
   const [toDelete, setToDelete] = useState<Profile | null>(null);
 
   const [fullName, setFullName] = useState('');
@@ -28,18 +39,7 @@ export default function UsuariosPage() {
   const [phone, setPhone] = useState('');
   const [vehiclePlate, setVehiclePlate] = useState('');
   const [zone, setZone] = useState('');
-
-  async function load() {
-    setLoading(true);
-    const res = await fetch('/api/users');
-    const json = await res.json();
-    setUsers(json.users ?? []);
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
+  const [driverCode, setDriverCode] = useState('');
 
   function resetForm() {
     setFullName('');
@@ -49,6 +49,7 @@ export default function UsuariosPage() {
     setPhone('');
     setVehiclePlate('');
     setZone('');
+    setDriverCode('');
     setShowForm(false);
     setEditingUser(null);
   }
@@ -61,6 +62,7 @@ export default function UsuariosPage() {
     setPhone(u.phone ?? '');
     setVehiclePlate(u.vehicle_plate ?? '');
     setZone(u.zone ?? '');
+    setDriverCode(u.driver_code ?? '');
     setShowForm(true);
   }
 
@@ -78,6 +80,7 @@ export default function UsuariosPage() {
           phone: phone || undefined,
           vehicle_plate: role === 'conductor' ? vehiclePlate || undefined : undefined,
           zone: role === 'conductor' ? zone || undefined : undefined,
+          driver_code: role === 'conductor' ? driverCode || undefined : undefined,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -88,7 +91,7 @@ export default function UsuariosPage() {
       }
       toast.success('Usuario actualizado correctamente.');
       resetForm();
-      load();
+      reload();
       return;
     }
 
@@ -103,6 +106,7 @@ export default function UsuariosPage() {
         phone: phone || undefined,
         vehicle_plate: vehiclePlate || undefined,
         zone: zone || undefined,
+        driver_code: driverCode || undefined,
       }),
     });
     const json = await res.json().catch(() => ({}));
@@ -113,40 +117,22 @@ export default function UsuariosPage() {
     }
     toast.success('Usuario creado correctamente.');
     resetForm();
-    load();
-  }
-
-  async function toggleActive(user: Profile) {
-    await fetch(`/api/users/${user.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: true }),
-    });
-    toast.success('Usuario reactivado.');
-    load();
-  }
-
-  async function confirmDeactivate() {
-    if (!toDeactivate) return;
-    await fetch(`/api/users/${toDeactivate.id}`, { method: 'DELETE' });
-    toast.success('Usuario desactivado.');
-    setToDeactivate(null);
-    load();
+    reload();
   }
 
   async function confirmDelete() {
     if (!toDelete) return;
     setSubmitting(true);
-    const res = await fetch(`/api/users/${toDelete.id}?permanent=true`, { method: 'DELETE' });
+    const res = await fetch(`/api/users/${toDelete.id}`, { method: 'DELETE' });
     const json = await res.json().catch(() => ({}));
     setSubmitting(false);
     setToDelete(null);
     if (!res.ok) {
-      toast.error(json.error || 'Error al eliminar el usuario.');
+      toast.error(json.error || 'Error al eliminar el usuario.', json.reason === 'stock' ? { duration: 7000 } : undefined);
       return;
     }
-    toast.success(json.deleted ? 'Usuario eliminado permanentemente.' : json.message);
-    load();
+    toast.success('Usuario eliminado permanentemente.');
+    reload();
   }
 
   return (
@@ -212,6 +198,19 @@ export default function UsuariosPage() {
                   <label className="label-field">Zona</label>
                   <input className="input-field" value={zone} onChange={(e) => setZone(e.target.value)} />
                 </div>
+                <div>
+                  <label className="label-field">Código de conductor *</label>
+                  <input
+                    className="input-field uppercase"
+                    value={driverCode}
+                    onChange={(e) => setDriverCode(e.target.value.toUpperCase())}
+                    placeholder="Ej: SB"
+                    maxLength={6}
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    Se usa para generar el code de cada batería que se le entregue (p.ej. &quot;TK720 {driverCode || 'SB'}220801&quot;).
+                  </p>
+                </div>
               </>
             )}
           </div>
@@ -221,44 +220,44 @@ export default function UsuariosPage() {
         </form>
       )}
 
-      <div className="mt-6 space-y-3">
+      <input
+        className="input-field mt-6"
+        placeholder="Buscar por nombre, correo o rol…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
+      <div className="mt-4 space-y-3">
         {loading && <p className="text-sm text-slate-400">Cargando…</p>}
         {users.map((u) => (
           <div key={u.id} className="card flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-semibold text-slate-900">
-                {u.full_name} {!u.active && <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-600">Inactivo</span>}
-              </p>
+              <p className="font-semibold text-slate-900">{u.full_name}</p>
               <p className="text-sm text-slate-500">{u.email} · {ROLE_LABEL[u.role]}</p>
               {u.vehicle_plate && <p className="text-xs text-slate-400">Vehículo: {u.vehicle_plate} {u.zone ? `· Zona: ${u.zone}` : ''}</p>}
+              {u.role === 'conductor' && (
+                <p className="text-xs text-slate-400">
+                  Código: {u.driver_code ? <strong>{u.driver_code}</strong> : <span className="text-amber-600">sin asignar</span>}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <button className="btn-secondary" onClick={() => startEdit(u)}>Editar</button>
-              {u.active ? (
-                <button className="btn-secondary" onClick={() => setToDeactivate(u)}>Desactivar</button>
-              ) : (
-                <button className="btn-secondary" onClick={() => toggleActive(u)}>Reactivar</button>
-              )}
               <button className="btn-secondary text-red-600" onClick={() => setToDelete(u)}>Eliminar</button>
             </div>
           </div>
         ))}
+        {!loading && users.length === 0 && (
+          <div className="card text-center text-slate-400">Ningún usuario coincide con la búsqueda.</div>
+        )}
       </div>
 
-      <ConfirmModal
-        open={!!toDeactivate}
-        title="Desactivar usuario"
-        description={`${toDeactivate?.full_name} no podrá iniciar sesión hasta que se reactive. El historial se conserva.`}
-        confirmLabel="Desactivar"
-        tone="danger"
-        onConfirm={confirmDeactivate}
-        onCancel={() => setToDeactivate(null)}
-      />
+      <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
 
       <ConfirmModal
         open={!!toDelete}
         title="Eliminar usuario permanentemente"
-        description={`Esta acción borra a ${toDelete?.full_name} del sistema de acceso. Si tiene ventas, entregas o recepciones registradas, no se podrá borrar del todo y se desactivará en su lugar para no perder el histórico.`}
+        description={`Esta acción borra a ${toDelete?.full_name} del sistema por completo (no queda ningún rastro). Solo se bloqueará si todavía tiene stock de baterías asignado — en ese caso te lo avisará y tendrás que retirárselo primero.`}
         confirmLabel="Eliminar"
         tone="danger"
         loading={submitting}

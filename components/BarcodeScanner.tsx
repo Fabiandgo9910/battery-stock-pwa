@@ -31,6 +31,7 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
   const busyRef = useRef(false);
   const [phase, setPhase] = useState<'idle' | 'starting' | 'running' | 'paused' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [justDetected, setJustDetected] = useState(false);
   const lastScanRef = useRef<{ code: string; time: number }>({ code: '', time: 0 });
 
   const handleDetected = useCallback(
@@ -40,7 +41,12 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
         return;
       }
       lastScanRef.current = { code: decodedText, time: now };
+      // Feedback instantáneo (vibración + flash visual) ANTES de que el
+      // padre haga cualquier búsqueda async: así el escaneo en sí se percibe
+      // rápido incluso si buscar el modelo tarda un poco.
       if (navigator.vibrate) navigator.vibrate(80);
+      setJustDetected(true);
+      setTimeout(() => setJustDetected(false), 500);
       onScan(decodedText);
     },
     [onScan]
@@ -63,11 +69,20 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
             Html5QrcodeSupportedFormats.UPC_E,
           ],
           verbose: false,
+          // Usa la API nativa BarcodeDetector del navegador cuando está
+          // disponible (Chrome/Android): decodifica mucho más rápido que el
+          // decodificador en JS puro, que se usa como respaldo automático.
+          useBarCodeDetectorIfSupported: true,
         });
       }
       await scannerRef.current.start(
         { facingMode: 'environment' },
-        { fps: 12, qrbox: { width: 280, height: 140 }, aspectRatio: 1.6 },
+        {
+          fps: 24,
+          qrbox: { width: 300, height: 150 },
+          aspectRatio: 1.6,
+          disableFlip: false,
+        },
         (decodedText) => handleDetected(decodedText),
         () => {
           /* "no encontrado en este frame" - se ignora, es constante */
@@ -179,6 +194,14 @@ export default function BarcodeScanner({ onScan, active }: BarcodeScannerProps) 
     <div className="w-full">
       <div className="relative w-full overflow-hidden rounded-2xl border-2 border-charge-400 bg-slate-950 aspect-[4/3]">
         <div id={containerIdRef.current} className="h-full w-full" />
+
+        {justDetected && (
+          <div className="absolute inset-0 flex items-center justify-center bg-charge-400/30 pointer-events-none">
+            <span className="rounded-full bg-charge-400 px-4 py-2 text-lg font-bold text-slate-900 shadow-lg">
+              ✓ Detectado
+            </span>
+          </div>
+        )}
 
         {phase !== 'running' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950/90 px-6 text-center">

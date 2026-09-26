@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { useServerPagination, type ServerPageResult } from '@/hooks/useServerPagination';
+import DirectDeliveryModal from '@/components/DirectDeliveryModal';
 import toast from 'react-hot-toast';
+import { createBrowserClient } from '@/lib/supabaseClient';
 
 interface PosStockItem {
   quantity: number;
@@ -18,9 +22,20 @@ interface PosRow {
   pos_stock: PosStockItem[];
 }
 
+async function fetchPosPage(
+  { page, pageSize, search }: { page: number; pageSize: number; search: string },
+  signal: AbortSignal
+): Promise<ServerPageResult<PosRow>> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (search) params.set('search', search);
+  const res = await fetch(`/api/points-of-sale?${params.toString()}`, { signal });
+  const json = await res.json();
+  return { items: json.points_of_sale ?? [], total: json.total ?? 0 };
+}
+
 export default function PosPage() {
-  const [rows, setRows] = useState<PosRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const supabase = createBrowserClient();
+  const { page, setPage, search, setSearch, items: rows, total, loading, reload } = useServerPagination(fetchPosPage, { pageSize: 10 });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -32,16 +47,16 @@ export default function PosPage() {
   const [address, setAddress] = useState('');
   const [taxId, setTaxId] = useState('');
 
-  async function load() {
-    setLoading(true);
-    const res = await fetch('/api/points-of-sale');
-    const json = await res.json();
-    setRows(json.points_of_sale ?? []);
-    setLoading(false);
-  }
+  const [deliveryTarget, setDeliveryTarget] = useState<PosRow | null>(null);
+  const [warehouseId, setWarehouseId] = useState('');
 
   useEffect(() => {
-    load();
+    async function loadWarehouse() {
+      const { data: wh } = await supabase.from('warehouses').select('*').eq('active', true).eq('is_warranty_holding', false).limit(1).single();
+      if (wh) setWarehouseId(wh.id);
+    }
+    loadWarehouse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function resetForm() {
@@ -81,12 +96,12 @@ export default function PosPage() {
     const json = await res.json().catch(() => ({}));
     setSubmitting(false);
     if (!res.ok) {
-      toast.error(json.error || 'Error al guardar la venta comercial.');
+      toast.error(json.error || 'Error al guardar la empresa.');
       return;
     }
-    toast.success(editingId ? 'Venta comercial actualizada.' : 'Venta comercial creada.');
+    toast.success(editingId ? 'Empresa actualizada.' : 'Empresa creada.');
     resetForm();
-    load();
+    reload();
   }
 
   async function confirmDelete() {
@@ -97,24 +112,25 @@ export default function PosPage() {
     setSubmitting(false);
     setToDelete(null);
     if (!res.ok) {
-      toast.error(json.error || 'Error al eliminar la venta comercial.');
+      toast.error(json.error || 'Error al eliminar la empresa.');
       return;
     }
-    toast.success(json.deactivatedInstead ? json.message : 'Venta comercial eliminada.');
-    load();
+    toast.success(json.deactivatedInstead ? json.message : 'Empresa eliminada.');
+    reload();
   }
+
 
   return (
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Ventas comerciales</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">Empresas</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Empresas o talleres a los que el comercial vende directamente desde almacén.
+            Empresas y talleres a los que se les puede pedir o entregar directamente desde almacén.
           </p>
         </div>
         <button className="btn-charge" onClick={() => (showForm ? resetForm() : setShowForm(true))}>
-          {showForm ? 'Cerrar' : '+ Nuevo'}
+          {showForm ? 'Cerrar' : '+ Nueva'}
         </button>
       </div>
 
@@ -143,12 +159,19 @@ export default function PosPage() {
             </div>
           </div>
           <button type="submit" disabled={submitting} className="btn-charge w-full">
-            {submitting ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear venta comercial'}
+            {submitting ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear empresa'}
           </button>
         </form>
       )}
 
-      <div className="mt-6 space-y-3">
+      <input
+        className="input-field mt-6"
+        placeholder="Buscar…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
+      <div className="mt-4 space-y-3">
         {loading && <p className="text-sm text-slate-400">Cargando…</p>}
         {rows.map((r) => (
           <div key={r.id} className="card">
@@ -160,7 +183,8 @@ export default function PosPage() {
                 <p className="text-sm text-slate-500">{r.owner_name} {r.phone && `· ${r.phone}`}</p>
                 {r.address && <p className="text-xs text-slate-400">{r.address}</p>}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <button className="btn-charge" onClick={() => setDeliveryTarget(r)}>Entrega directa</button>
                 <button className="btn-secondary" onClick={() => startEdit(r)}>Editar</button>
                 <button className="btn-secondary text-red-600" onClick={() => setToDelete(r)}>Eliminar</button>
               </div>
@@ -176,12 +200,33 @@ export default function PosPage() {
             )}
           </div>
         ))}
+        {!loading && rows.length === 0 && !search && (
+          <div className="card text-center text-slate-400">Todavía no hay empresas dadas de alta.</div>
+        )}
+        {!loading && search && rows.length === 0 && (
+          <div className="card text-center text-slate-400">Ninguna coincide con la búsqueda.</div>
+        )}
       </div>
+
+      <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
+
+      {deliveryTarget && (
+        <DirectDeliveryModal
+          pointsOfSale={rows}
+          fixedPointOfSale={{ id: deliveryTarget.id, name: deliveryTarget.name }}
+          warehouseId={warehouseId}
+          onClose={() => setDeliveryTarget(null)}
+          onDone={() => {
+            setDeliveryTarget(null);
+            reload();
+          }}
+        />
+      )}
 
       <ConfirmModal
         open={!!toDelete}
-        title="Eliminar venta comercial"
-        description={`Vas a eliminar ${toDelete?.name}. Si tiene ventas o facturas asociadas, se desactivará en su lugar para no perder el histórico.`}
+        title="Eliminar empresa"
+        description={`Vas a eliminar ${toDelete?.name}. Si tiene pedidos o salidas asociadas, se desactivará en su lugar para no perder el histórico.`}
         confirmLabel="Eliminar"
         tone="danger"
         loading={submitting}
@@ -191,3 +236,4 @@ export default function PosPage() {
     </div>
   );
 }
+

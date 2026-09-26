@@ -6,6 +6,8 @@ import { useProfile } from '@/hooks/useProfile';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import { useState } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import PendingOrderGate from '@/components/PendingOrderGate';
+import RejectedOrderAlert from '@/components/RejectedOrderAlert';
 
 interface NavItem {
   href: string;
@@ -18,18 +20,24 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Inicio', roles: ['admin', 'almacenero', 'conductor', 'comercial'], icon: '🏠' },
   { href: '/dashboard/almacen/recepcion', label: 'Recepción', roles: ['admin', 'almacenero'], icon: '📥' },
   { href: '/dashboard/almacen/entrega-conductor', label: 'Entregar a conductor', roles: ['admin', 'almacenero'], icon: '🚚' },
+  { href: '/dashboard/almacen/pedidos-pendientes', label: 'Pedidos de conductores', roles: ['admin', 'almacenero'], icon: '⏳' },
+  { href: '/dashboard/pedidos-comerciales', label: 'Pedidos comerciales', roles: ['admin', 'almacenero', 'comercial'], icon: '🧾' },
+  { href: '/dashboard/almacen/salidas', label: 'Salidas de almacén', roles: ['admin', 'almacenero', 'comercial'], icon: '📤' },
+  { href: '/dashboard/almacen/chatarra', label: 'Chatarra (baterías viejas)', roles: ['admin', 'almacenero', 'comercial'], icon: '🔋' },
+  { href: '/dashboard/almacen/prestamos', label: 'Préstamos', roles: ['admin', 'almacenero'], icon: '🤝' },
   { href: '/dashboard/almacen/productos', label: 'Modelos de producto', roles: ['admin', 'almacenero'], icon: '🔋' },
   { href: '/dashboard/almacen/distribuidores', label: 'Distribuidores', roles: ['admin', 'almacenero'], icon: '🏭' },
+  { href: '/dashboard/almacen/venta-directa', label: 'Venta directa almacén', roles: ['admin', 'almacenero'], icon: '💶' },
+  { href: '/dashboard/almacen/devoluciones', label: 'Devoluciones', roles: ['admin', 'almacenero'], icon: '↩️' },
+  { href: '/dashboard/conductor/pedidos', label: 'Pedidos', roles: ['conductor'], icon: '📋' },
+  { href: '/dashboard/conductor/solicitar-pedido', label: 'Solicitar pedido', roles: ['conductor'], icon: '🙋' },
   { href: '/dashboard/conductor/vender', label: 'Vender', roles: ['conductor'], icon: '💳' },
   { href: '/dashboard/conductor/mi-stock', label: 'Mi stock', roles: ['conductor'], icon: '📦' },
   { href: '/dashboard/conductor/billetera', label: 'Mi caja', roles: ['conductor'], icon: '👛' },
-  { href: '/dashboard/comercial/venta', label: 'Venta comercial', roles: ['admin', 'almacenero', 'comercial'], icon: '🧾' },
-  { href: '/dashboard/comercial/facturas', label: 'Facturas', roles: ['admin', 'almacenero', 'comercial'], icon: '📄' },
-  { href: '/dashboard/pos', label: 'Ventas comerciales', roles: ['admin', 'comercial'], icon: '🏪' },
+  { href: '/dashboard/pos', label: 'Empresas', roles: ['admin', 'almacenero', 'comercial'], icon: '🏪' },
   { href: '/dashboard/usuarios', label: 'Usuarios', roles: ['admin'], icon: '👥' },
   { href: '/dashboard/admin/billeteras', label: 'Cajas de conductores', roles: ['admin'], icon: '💰' },
   { href: '/dashboard/admin/ventas-diarias', label: 'Ventas del día', roles: ['admin'], icon: '📊' },
-  { href: '/dashboard/admin/auditoria', label: 'Auditoría', roles: ['admin'], icon: '🔍' },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -149,6 +157,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         onConfirm={doLogout}
         onCancel={() => setConfirmLogout(false)}
       />
+
+      {profile?.role === 'conductor' && <PendingOrderGate />}
+      {(profile?.role === 'admin' || profile?.role === 'almacenero') && <RejectedOrderAlert />}
     </div>
   );
 }

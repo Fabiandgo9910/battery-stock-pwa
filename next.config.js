@@ -2,7 +2,7 @@ const withPWA = require('next-pwa')({
   dest: 'public',
   register: true,
   skipWaiting: true,
-  disable: process.env.NODE_ENV === 'development',
+  disable: process.env.NODE_ENV === 'development' || process.env.DISABLE_PWA === 'true',
   // Evita que el manifiesto de build de Next quede cacheado por el SW
   // (causa típica de "la PWA no funciona bien" tras cada despliegue).
   buildExcludes: [/middleware-manifest\.json$/, /app-build-manifest\.json$/],

@@ -3,10 +3,13 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
+import { usePagination } from '@/hooks/usePagination';
 import type { Supplier } from '@/types/domain';
 
 export default function DistribuidoresPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<Supplier | null>(null);
@@ -86,6 +89,9 @@ export default function DistribuidoresPage() {
     load();
   }
 
+  const filtered = suppliers.filter((s) => s.name.toLowerCase().includes(search.toLowerCase()));
+  const { page, setPage, pageItems, total } = usePagination(filtered, 10);
+
   return (
     <div className="mx-auto max-w-2xl">
       <div className="flex items-center justify-between">
@@ -124,8 +130,15 @@ export default function DistribuidoresPage() {
         </form>
       )}
 
-      <div className="mt-6 space-y-3">
-        {suppliers.map((s) => (
+      <input
+        className="input-field mt-6"
+        placeholder="Buscar distribuidor…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
+      <div className="mt-4 space-y-3">
+        {pageItems.map((s) => (
           <div key={s.id} className="card flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="font-semibold text-slate-900">{s.name}</p>
@@ -139,7 +152,12 @@ export default function DistribuidoresPage() {
           </div>
         ))}
         {suppliers.length === 0 && <div className="card text-center text-slate-400">Sin distribuidores todavía.</div>}
+        {suppliers.length > 0 && filtered.length === 0 && (
+          <div className="card text-center text-slate-400">Ningún distribuidor coincide con la búsqueda.</div>
+        )}
       </div>
+
+      <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
 
       <ConfirmModal
         open={!!toDelete}

@@ -9,6 +9,7 @@ const updateSchema = z.object({
   phone: z.string().optional(),
   vehicle_plate: z.string().optional(),
   zone: z.string().optional(),
+  driver_code: z.string().optional(),
   active: z.boolean().optional(),
 });
 
@@ -41,8 +42,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join(' · ') }, { status: 400 });
     }
 
-    const { error } = await supabase.from('profiles').update(parsed.data).eq('id', params.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const updateData = { ...parsed.data };
+    if (updateData.driver_code) updateData.driver_code = updateData.driver_code.toUpperCase();
+
+    const { error } = await supabase.from('profiles').update(updateData).eq('id', params.id);
+    if (error) {
+      const message = error.message.includes('idx_profiles_driver_code')
+        ? 'Ese código de conductor ya lo tiene otro conductor. Elige uno distinto.'
+        : error.message;
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('PATCH /api/users/[id]', err);
@@ -53,38 +62,47 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-// DELETE /api/users/:id -> por defecto DESACTIVA (soft delete, conserva trazabilidad).
-// DELETE /api/users/:id?permanent=true -> ELIMINA de verdad (Auth + perfil).
-// Se recomienda usar el borrado permanente solo si el usuario nunca llegó a
-// operar en el sistema (si tiene ventas/entregas registradas, el borrado
-// físico fallará por integridad referencial y se avisa al admin).
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+// DELETE /api/users/:id -> elimina de verdad (Auth + perfil), SALVO que el
+//   usuario tenga stock físico asignado (driver_stock con cantidad > 0): en
+//   ese caso se bloquea con un mensaje explícito y NO se borra, para forzar
+//   a retirarle el stock antes.
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const supabase = createRouteClient();
     const guard = await requireAdmin(supabase);
     if (guard.error) return guard.error;
 
-    const permanent = req.nextUrl.searchParams.get('permanent') === 'true';
+    const { data: stockRows, error: stockErr } = await supabase
+      .from('driver_stock')
+      .select('quantity, product_model:product_models(brand, model_name)')
+      .eq('driver_id', params.id)
+      .gt('quantity', 0);
 
-    if (!permanent) {
-      const { error } = await supabase.from('profiles').update({ active: false }).eq('id', params.id);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      return NextResponse.json({ ok: true, deleted: false });
+    if (stockErr) {
+      return NextResponse.json({ error: `No se pudo comprobar el stock: ${stockErr.message}` }, { status: 500 });
     }
 
-    // Borrado permanente: requiere el cliente con service role para tocar Auth.
+    if (stockRows && stockRows.length > 0) {
+      const detail = stockRows
+        .map((r: any) => `${r.product_model?.brand ?? ''} ${r.product_model?.model_name ?? ''} (${r.quantity})`)
+        .join(', ');
+      return NextResponse.json(
+        {
+          error: `No se puede eliminar: el usuario todavía tiene stock asignado — ${detail}. Retírale el stock (entrégalo a otro conductor o haz una devolución al almacén) y vuelve a intentarlo.`,
+          reason: 'stock',
+        },
+        { status: 409 }
+      );
+    }
+
     const admin = adminClient();
     const { error: authErr } = await admin.auth.admin.deleteUser(params.id);
 
     if (authErr) {
-      // Si falla (p. ej. porque tiene ventas/entregas asociadas y algo bloquea
-      // el borrado en cascada), lo dejamos desactivado en su lugar.
-      await supabase.from('profiles').update({ active: false }).eq('id', params.id);
-      return NextResponse.json({
-        ok: true,
-        deleted: false,
-        message: 'No se pudo eliminar por completo (tiene historial asociado), así que se ha desactivado en su lugar.',
-      });
+      return NextResponse.json(
+        { error: `No se pudo eliminar: ${authErr.message}` },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true, deleted: true });

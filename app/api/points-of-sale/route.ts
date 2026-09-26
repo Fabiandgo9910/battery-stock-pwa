@@ -31,19 +31,43 @@ async function requireCommercialOrAdmin(supabase: ReturnType<typeof createRouteC
 // GET /api/points-of-sale -> lista con su stock por modelo.
 // Lectura permitida a admin, comercial y almacenero (para poder vender);
 // la gestión (crear/editar/eliminar) queda solo para admin/comercial.
-export async function GET() {
+// GET /api/points-of-sale?search=&page=&pageSize() -> con parámetros de
+// página, pagina en servidor (para la lista de Empresas); sin ellos, devuelve
+// todo (compatibilidad con selectores/desplegables que ya la usaban así).
+export async function GET(req: NextRequest) {
   try {
     const supabase = createRouteClient();
     const guard = await requireAuth(supabase);
     if (guard.error) return guard.error;
 
-    const { data, error } = await supabase
-      .from('points_of_sale')
-      .select('*, pos_stock(quantity, product_model:product_models(brand, model_name))')
-      .order('name');
+    const pageParam = req.nextUrl.searchParams.get('page');
+    if (!pageParam) {
+      const { data, error } = await supabase
+        .from('points_of_sale')
+        .select('*, pos_stock(quantity, product_model:product_models(brand, model_name))')
+        .order('name');
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ points_of_sale: data });
+    }
 
+    const search = req.nextUrl.searchParams.get('search')?.trim() ?? '';
+    const page = Math.max(1, Number(pageParam) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.nextUrl.searchParams.get('pageSize')) || 10));
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let query = supabase
+      .from('points_of_sale')
+      .select('*, pos_stock(quantity, product_model:product_models(brand, model_name))', { count: 'exact' })
+      .order('name');
+    if (search) {
+      const safe = search.replace(/[,()]/g, ' ').trim();
+      if (safe) query = query.ilike('name', `%${safe}%`);
+    }
+
+    const { data, error, count } = await query.range(from, to);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ points_of_sale: data });
+    return NextResponse.json({ points_of_sale: data, total: count ?? 0 });
   } catch (err) {
     console.error('GET /api/points-of-sale', err);
     return NextResponse.json({ error: 'Error inesperado al listar ventas comerciales' }, { status: 500 });

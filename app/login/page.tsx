@@ -16,15 +16,36 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
 
-    if (error) {
-      toast.error('Credenciales incorrectas o usuario inactivo.');
+    if (!error) {
+      setLoading(false);
+      toast.success('Bienvenido');
+      router.push('/dashboard');
+      router.refresh();
       return;
     }
-    toast.success('Bienvenido');
-    router.push('/dashboard');
-    router.refresh();
+
+    // Login falló: averiguamos el motivo exacto (no existe / desactivado /
+    // contraseña incorrecta) para dar un mensaje preciso en vez del genérico.
+    try {
+      const res = await fetch('/api/auth/login-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const json = await res.json();
+      if (json.status === 'not_found') {
+        toast.error('No existe ninguna cuenta con ese correo.');
+      } else if (json.status === 'wrong_password') {
+        toast.error('Contraseña incorrecta.');
+      } else {
+        toast.error('No se pudo iniciar sesión. Inténtalo de nuevo.');
+      }
+    } catch {
+      toast.error('Credenciales incorrectas.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

@@ -11,6 +11,7 @@ const createSchema = z.object({
   phone: z.string().optional(),
   vehicle_plate: z.string().optional(),
   zone: z.string().optional(),
+  driver_code: z.string().optional(),
 });
 
 // Cliente admin (service role) SOLO se usa server-side, nunca se expone al navegador.
@@ -29,8 +30,8 @@ function adminClient() {
   });
 }
 
-// GET /api/users -> lista de usuarios (solo admin)
-export async function GET() {
+// GET /api/users?search=&page=&pageSize= -> lista paginada de usuarios (solo admin)
+export async function GET(req: NextRequest) {
   try {
     const supabase = createRouteClient();
     const {
@@ -41,9 +42,21 @@ export async function GET() {
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
     if (profile?.role !== 'admin') return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
 
-    const { data, error } = await supabase.from('profiles').select('*').order('full_name');
+    const search = req.nextUrl.searchParams.get('search')?.trim() ?? '';
+    const page = Math.max(1, Number(req.nextUrl.searchParams.get('page')) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.nextUrl.searchParams.get('pageSize')) || 15));
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let query = supabase.from('profiles').select('*', { count: 'exact' }).order('full_name');
+    if (search) {
+      const safe = search.replace(/[,()]/g, ' ').trim();
+      if (safe) query = query.or(`full_name.ilike.%${safe}%,email.ilike.%${safe}%`);
+    }
+
+    const { data, error, count } = await query.range(from, to);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ users: data });
+    return NextResponse.json({ users: data, total: count ?? 0 });
   } catch (err) {
     console.error('GET /api/users', err);
     return NextResponse.json(
@@ -100,12 +113,16 @@ export async function POST(req: NextRequest) {
       phone: body.phone || null,
       vehicle_plate: body.role === 'conductor' ? body.vehicle_plate || null : null,
       zone: body.role === 'conductor' ? body.zone || null : null,
+      driver_code: body.role === 'conductor' ? body.driver_code?.toUpperCase() || null : null,
     });
 
     if (profileErr) {
       // Si el perfil falla, deshacemos el usuario de Auth para no dejar huérfanos
       await admin.auth.admin.deleteUser(created.user.id).catch(() => {});
-      return NextResponse.json({ error: `Error al crear el perfil: ${profileErr.message}` }, { status: 500 });
+      const message = profileErr.message.includes('idx_profiles_driver_code')
+        ? 'Ese código de conductor ya lo tiene otro conductor. Elige uno distinto.'
+        : `Error al crear el perfil: ${profileErr.message}`;
+      return NextResponse.json({ error: message }, { status: 500 });
     }
 
     // 3) Si es conductor, crea su billetera con saldos a 0

@@ -6,9 +6,12 @@ import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
 // El admin siempre tiene acceso a todo.
 const ROLE_ROUTES: Record<string, string[]> = {
   admin: ['*'],
-  almacenero: ['/dashboard', '/dashboard/almacen', '/dashboard/comercial'],
+  almacenero: ['/dashboard', '/dashboard/almacen', '/dashboard/comercial', '/dashboard/pos', '/dashboard/pedidos-comerciales'],
   conductor: ['/dashboard', '/dashboard/conductor'],
-  comercial: ['/dashboard', '/dashboard/comercial', '/dashboard/pos'],
+  comercial: [
+    '/dashboard', '/dashboard/comercial', '/dashboard/pos', '/dashboard/pedidos-comerciales',
+    '/dashboard/almacen/salidas', '/dashboard/almacen/chatarra',
+  ],
 };
 
 export async function middleware(req: NextRequest) {
@@ -35,11 +38,11 @@ export async function middleware(req: NextRequest) {
   if (session && isProtectedRoute) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role, active')
+      .select('role')
       .eq('id', session.user.id)
       .single();
 
-    if (!profile || !profile.active) {
+    if (!profile) {
       await supabase.auth.signOut();
       return NextResponse.redirect(new URL('/login', req.url));
     }

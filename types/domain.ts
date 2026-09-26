@@ -10,8 +10,26 @@ export interface Profile {
   avatar_url: string | null;
   vehicle_plate: string | null;
   zone: string | null;
+  driver_code: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type DeliveryType = 'conductor' | 'ofi' | 'web';
+
+export type BatteryUnitStatus = 'assigned' | 'sold' | 'returned' | 'cancelled';
+
+export interface BatteryUnit {
+  id: string;
+  code: string;
+  product_model_id: string;
+  delivery_id: string | null;
+  driver_id: string | null;
+  delivery_type: DeliveryType;
+  status: BatteryUnitStatus;
+  sale_id: string | null;
+  created_at: string;
+  sold_at: string | null;
 }
 
 export type BatteryTech = 'normal' | 'agm' | 'efb';
@@ -26,6 +44,19 @@ export interface ProductModel {
   battery_tech: BatteryTech | null;
   is_special: boolean;
   special_reason: string | null;
+  reference_code: string | null;
+  polarity: string | null;
+  length_mm: number | null;
+  width_mm: number | null;
+  height_mm: number | null;
+  box_code: string | null;
+  hold_down_code: string | null;
+  weight_kg: number | null;
+  pcs_per_layer: number | null;
+  layers_per_pallet: number | null;
+  pcs_per_pallet: number | null;
+  price_pvp: number | null;
+  tech_line: string | null;
   extra_attributes: Record<string, unknown>;
   min_stock_alert: number;
   active: boolean;
