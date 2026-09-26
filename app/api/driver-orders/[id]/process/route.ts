@@ -35,7 +35,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ ok: true });
+
+    const { data: batteryUnits } = await supabase
+      .from('battery_units')
+      .select('id, code, product_model_id, product_model:product_models(brand, model_name)')
+      .eq('delivery_id', params.id)
+      .order('code');
+
+    return NextResponse.json({ ok: true, battery_units: batteryUnits ?? [] });
   } catch (err) {
     console.error('POST /api/driver-orders/[id]/process', err);
     return NextResponse.json(

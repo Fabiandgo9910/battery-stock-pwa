@@ -14,6 +14,8 @@ const bodySchema = z.object({
   old_battery_reason: z.string().optional(),
   sale_origin: z.enum(['particular', 'web', 'mapfre']).default('particular'),
   notes: z.string().optional(),
+  battery_unit_id: z.string().uuid().optional(),
+  customer_vehicle_model: z.string().optional(),
 });
 
 // POST /api/driver-sale -> venta unitaria de un conductor (resta su stock, suma su billetera).
@@ -43,6 +45,8 @@ export async function POST(req: NextRequest) {
       p_old_battery_reason: body.old_battery_reason ?? null,
       p_sale_origin: body.sale_origin,
       p_notes: body.notes ?? null,
+      p_battery_unit_id: body.battery_unit_id ?? null,
+      p_customer_vehicle_model: body.customer_vehicle_model ?? null,
     });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

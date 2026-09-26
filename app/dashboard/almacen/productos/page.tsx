@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import ConfirmModal from '@/components/ConfirmModal';
 import Pagination from '@/components/Pagination';
-import { usePagination } from '@/hooks/usePagination';
+import ProductDetailsModal from '@/components/ProductDetailsModal';
+import InventoryModal from '@/components/InventoryModal';
+import { useServerPagination, type ServerPageResult } from '@/hooks/useServerPagination';
 import toast from 'react-hot-toast';
 import type { ProductModel } from '@/types/domain';
 
@@ -13,14 +15,36 @@ interface Row extends ProductModel {
   warehouse_stock?: { quantity: number; warehouse: { is_warranty_holding: boolean } | null }[];
 }
 
+interface ImportResult {
+  created: number;
+  updated: number;
+  warnings: string[];
+}
+
+async function fetchProductsPage(
+  { page, pageSize, search }: { page: number; pageSize: number; search: string },
+  signal: AbortSignal
+): Promise<ServerPageResult<Row>> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (search) params.set('search', search);
+  const res = await fetch(`/api/product-models?${params.toString()}`, { signal });
+  const json = await res.json();
+  return { items: json.product_models ?? [], total: json.total ?? 0 };
+}
+
 export default function ProductosPage() {
   const supabase = createBrowserClient();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const { page, setPage, search, setSearch, items, total, loading, reload } = useServerPagination(fetchProductsPage, { pageSize: 15 });
+
   const [editing, setEditing] = useState<Row | null>(null);
+  const [detailsRow, setDetailsRow] = useState<Row | null>(null);
   const [toDelete, setToDelete] = useState<Row | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [showInventory, setShowInventory] = useState(false);
+  const [warehouseId, setWarehouseId] = useState('');
 
   const [brand, setBrand] = useState('');
   const [modelName, setModelName] = useState('');
@@ -31,21 +55,41 @@ export default function ProductosPage() {
   const [specialReason, setSpecialReason] = useState('');
   const [minStock, setMinStock] = useState('5');
 
-  async function load() {
-    setLoading(true);
-    const { data } = await supabase
-      .from('product_models')
-      .select('*, product_ean_codes(ean_code), warehouse_stock(quantity, warehouse:warehouses(is_warranty_holding))')
-      .eq('active', true)
-      .order('brand');
-    setRows((data as any) ?? []);
-    setLoading(false);
-  }
-
   useEffect(() => {
-    load();
+    async function loadRole() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { data } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+      setIsAdmin(data?.role === 'admin');
+    }
+    async function loadWarehouse() {
+      const { data: wh } = await supabase.from('warehouses').select('*').eq('active', true).eq('is_warranty_holding', false).limit(1).single();
+      if (wh) setWarehouseId(wh.id);
+    }
+    loadRole();
+    loadWarehouse();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch('/api/imports/almacen-productos', { method: 'POST', body: formData });
+    const json = await res.json().catch(() => ({}));
+    setImporting(false);
+    if (!res.ok) {
+      toast.error(json.error || 'Error al importar el Excel.');
+      return;
+    }
+    setImportResult(json);
+    toast.success(`Importado: ${json.created} creados, ${json.updated} actualizados.`);
+    reload();
+  }
 
   function startEdit(r: Row) {
     setEditing(r);
@@ -84,7 +128,7 @@ export default function ProductosPage() {
     }
     toast.success('Modelo actualizado.');
     setEditing(null);
-    load();
+    reload();
   }
 
   async function confirmDelete() {
@@ -99,24 +143,64 @@ export default function ProductosPage() {
       return;
     }
     toast.success(json.deactivatedInstead ? json.message : 'Modelo eliminado.');
-    load();
+    reload();
   }
-
-  const filtered = rows.filter((r) =>
-    `${r.brand} ${r.model_name}`.toLowerCase().includes(search.toLowerCase())
-  );
-  const { page, setPage, pageItems, total } = usePagination(filtered, 15);
 
   return (
     <div className="mx-auto max-w-4xl">
-      <h1 className="text-2xl font-semibold text-slate-900">Modelos de producto</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Catálogo de baterías. Se crean automáticamente al escanear un EAN nuevo en Recepción, y aquí puedes editarlas o eliminarlas.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Modelos de producto</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Catálogo de baterías. Se crean automáticamente al escanear un EAN nuevo en Recepción, y aquí puedes editarlas o eliminarlas.
+          </p>
+        </div>
+        <button className="btn-charge whitespace-nowrap" onClick={() => setShowInventory(true)}>
+          📋 Hacer inventario
+        </button>
+      </div>
+
+      <div className="card mt-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-slate-900">Catálogo completo en Excel</p>
+          <p className="text-xs text-slate-400">
+            Todos los modelos, cantidades y propiedades (incluido el EAN), en el mismo formato para exportar e importar.
+            El EAN es el identificador único: un modelo solo puede tener un EAN.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn-secondary whitespace-nowrap"
+            onClick={() => window.open('/api/exports/almacen-productos', '_blank')}
+          >
+            Exportar catálogo
+          </button>
+          {isAdmin && (
+            <label className="btn-charge cursor-pointer whitespace-nowrap">
+              {importing ? 'Importando…' : 'Importar catálogo'}
+              <input type="file" accept=".xlsx" className="hidden" disabled={importing} onChange={handleImportFile} />
+            </label>
+          )}
+        </div>
+      </div>
+
+      {importResult && (
+        <div className="card mt-3 border-2 border-charge-200 text-sm">
+          <p className="font-medium text-slate-900">
+            Importación completada: {importResult.created} modelo(s) nuevos, {importResult.updated} actualizados.
+          </p>
+          {importResult.warnings.length > 0 && (
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-700">
+              {importResult.warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          )}
+          <button className="mt-3 text-xs text-slate-400 underline" onClick={() => setImportResult(null)}>Cerrar</button>
+        </div>
+      )}
 
       <input
         className="input-field mt-6"
-        placeholder="Buscar por marca o modelo…"
+        placeholder="Buscar por marca, modelo o referencia…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
@@ -138,10 +222,10 @@ export default function ProductosPage() {
             {loading && (
               <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
             )}
-            {filtered.length === 0 && !loading && (
+            {items.length === 0 && !loading && (
               <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Sin resultados.</td></tr>
             )}
-            {pageItems.map((r) => {
+            {!loading && items.map((r) => {
               const stock = r.warehouse_stock
                 ?.filter((s) => !s.warehouse?.is_warranty_holding)
                 .reduce((sum, s) => sum + s.quantity, 0) ?? 0;
@@ -151,7 +235,9 @@ export default function ProductosPage() {
               return (
                 <tr key={r.id} className="border-t border-slate-100">
                   <td className="px-4 py-3">
-                    <p className="font-medium text-slate-900">{r.brand} {r.model_name}</p>
+                    <button className="text-left font-medium text-slate-900 hover:underline" onClick={() => setDetailsRow(r)}>
+                      {r.brand} {r.model_name}
+                    </button>
                     {r.is_special && (
                       <p className="text-xs text-charge-700">Especial: {r.special_reason}</p>
                     )}
@@ -180,7 +266,8 @@ export default function ProductosPage() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      <button className="btn-secondary" onClick={() => setDetailsRow(r)}>Ver detalles</button>
                       <button className="btn-secondary" onClick={() => startEdit(r)}>Editar</button>
                       <button className="btn-secondary text-red-600" onClick={() => setToDelete(r)}>Eliminar</button>
                     </div>
@@ -193,6 +280,16 @@ export default function ProductosPage() {
       </div>
 
       <Pagination page={page} pageSize={15} total={total} onPageChange={setPage} />
+
+      {detailsRow && <ProductDetailsModal model={detailsRow} onClose={() => setDetailsRow(null)} />}
+
+      {showInventory && warehouseId && (
+        <InventoryModal
+          warehouseId={warehouseId}
+          onClose={() => setShowInventory(false)}
+          onCounted={reload}
+        />
+      )}
 
       {editing && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">

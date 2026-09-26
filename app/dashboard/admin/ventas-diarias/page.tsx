@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
+import SignatureViewer from '@/components/SignatureViewer';
 
 interface Row {
   seller_id: string;
@@ -15,6 +16,17 @@ interface Row {
   card_total: number;
   sales_count: number;
   old_batteries_collected: number;
+}
+
+interface SaleDetail {
+  id: string;
+  sold_at: string;
+  total_amount: number;
+  payment_method: string;
+  is_warranty: boolean;
+  customer_vehicle_plate: string | null;
+  sale_origin: string;
+  sale_items: { quantity: number; product_model: { brand: string; model_name: string } | null }[];
 }
 
 function todayISO() {
@@ -44,6 +56,9 @@ export default function VentasDiariasPage() {
   const [search, setSearch] = useState('');
   const [totals, setTotals] = useState({ units_sold: 0, units_cash: 0, units_card: 0, cash_total: 0, card_total: 0, old_batteries_collected: 0 });
   const [loading, setLoading] = useState(true);
+  const [detailsRow, setDetailsRow] = useState<Row | null>(null);
+  const [sellerSales, setSellerSales] = useState<SaleDetail[] | null>(null);
+  const [signatureSaleId, setSignatureSaleId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +81,15 @@ export default function VentasDiariasPage() {
   const filtered = rows.filter((r) => r.seller_name.toLowerCase().includes(search.toLowerCase()));
   const { page, setPage, pageItems, total } = usePagination(filtered, 15);
 
+  async function openSellerSales(row: Row) {
+    setDetailsRow(row);
+    setSellerSales(null);
+    const { start, end } = computeRange(date);
+    const res = await fetch(`/api/admin/seller-sales?seller_id=${row.seller_id}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+    const json = await res.json().catch(() => ({}));
+    setSellerSales(json.sales ?? []);
+  }
+
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="text-2xl font-semibold text-slate-900">Ventas del día</h1>
@@ -87,6 +111,12 @@ export default function VentasDiariasPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <button
+          className="btn-charge whitespace-nowrap"
+          onClick={() => window.open(`/api/exports/caja-conductores?from=${date}&to=${date}`, '_blank')}
+        >
+          Exportar caja conductores
+        </button>
       </div>
 
       {isToday(date) && (
@@ -130,14 +160,15 @@ export default function VentasDiariasPage() {
               <th className="px-4 py-3">💵 Efectivo</th>
               <th className="px-4 py-3">💳 Tarjeta</th>
               <th className="px-4 py-3">Total</th>
+              <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Cargando…</td></tr>
             )}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Sin ventas para ese filtro.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Sin ventas para ese filtro.</td></tr>
             )}
             {pageItems.map((r) => (
               <tr key={r.seller_id} className="border-t border-slate-100">
@@ -149,6 +180,9 @@ export default function VentasDiariasPage() {
                 <td className="px-4 py-3 text-slate-600">{r.cash_total.toFixed(2)} €</td>
                 <td className="px-4 py-3 text-slate-600">{r.card_total.toFixed(2)} €</td>
                 <td className="px-4 py-3 font-semibold text-slate-900">{(r.cash_total + r.card_total).toFixed(2)} €</td>
+                <td className="px-4 py-3">
+                  <button className="btn-secondary whitespace-nowrap" onClick={() => openSellerSales(r)}>Ver ventas</button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -156,6 +190,44 @@ export default function VentasDiariasPage() {
       </div>
 
       <Pagination page={page} pageSize={15} total={total} onPageChange={setPage} />
+
+      {detailsRow && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full sm:max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Ventas de {detailsRow.seller_name}</h2>
+              <button className="text-sm text-slate-400" onClick={() => setDetailsRow(null)}>Cerrar</button>
+            </div>
+            <div className="mt-4 space-y-2">
+              {sellerSales === null && <p className="text-sm text-slate-400">Cargando…</p>}
+              {sellerSales?.length === 0 && <p className="text-sm text-slate-400">Sin ventas individuales en este rango.</p>}
+              {sellerSales?.map((s) => (
+                <div key={s.id} className="rounded-xl border border-slate-100 px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-slate-900">
+                      {s.sale_items.map((i) => `${i.quantity}x ${i.product_model?.brand ?? ''} ${i.product_model?.model_name ?? ''}`).join(', ')}
+                    </p>
+                    <button className="btn-secondary whitespace-nowrap text-xs" onClick={() => setSignatureSaleId(s.id)}>Ver firma</button>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {new Date(s.sold_at).toLocaleTimeString('es-ES')} · {s.is_warranty ? 'Garantía' : `${s.total_amount.toFixed(2)} €`} ·{' '}
+                    {s.payment_method} {s.customer_vehicle_plate ? `· ${s.customer_vehicle_plate}` : ''}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <button className="btn-secondary mt-6 w-full" onClick={() => setDetailsRow(null)}>Cerrar</button>
+          </div>
+        </div>
+      )}
+
+      {signatureSaleId && (
+        <SignatureViewer
+          kind="warehouse_sale"
+          referenceId={signatureSaleId}
+          onClose={() => setSignatureSaleId(null)}
+        />
+      )}
     </div>
   );
 }

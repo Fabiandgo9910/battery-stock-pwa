@@ -57,11 +57,16 @@ create table profiles (
   -- si el rol es 'conductor', puede tener info adicional (vehículo, zona)
   vehicle_plate text,
   zone text,
+  -- código corto propio del conductor, usado para generar el code de cada
+  -- batería que se le entrega (p.ej. "SB" -> "TK720 SB220801")
+  driver_code text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index idx_profiles_role on profiles(role);
+create unique index idx_profiles_driver_code on profiles (upper(driver_code))
+  where driver_code is not null and trim(driver_code) <> '';
 
 -- ---------------------------------------------------------------------------
 -- PRODUCTOS - MODELO GENÉRICO (para que mañana no sea solo baterías)
@@ -84,6 +89,20 @@ create table product_models (
   battery_tech battery_tech,
   is_special boolean not null default false,
   special_reason text,
+  -- Ficha ampliada de almacén (compatible con la ficha de fabricante, p.ej. Tudor)
+  reference_code text,        -- GPN / referencia del fabricante
+  polarity text,               -- p.ej. "ETN 0"
+  length_mm integer,           -- L (mm)
+  width_mm integer,            -- W (mm)
+  height_mm integer,           -- H (mm)
+  box_code text,                -- BOX (p.ej. "B24")
+  hold_down_code text,          -- HOLD DOWN (p.ej. "B0")
+  weight_kg numeric(6,2),       -- peso de la batería
+  pcs_per_layer integer,        -- unidades por capa de palet
+  layers_per_pallet integer,    -- nº de capas por palet
+  pcs_per_pallet integer,       -- unidades por palet
+  price_pvp numeric(10,2),      -- PVP de fabricante
+  tech_line text,                -- línea del fabricante (p.ej. "GEL PRO", "TECHNICA"...)
   extra_attributes jsonb not null default '{}',
   min_stock_alert integer not null default 5,
   active boolean not null default true,
@@ -95,6 +114,9 @@ create table product_models (
 
 create index idx_product_models_category on product_models(category_id);
 create index idx_product_models_brand on product_models(brand);
+create unique index idx_product_models_reference_code
+  on product_models (upper(reference_code))
+  where reference_code is not null and trim(reference_code) <> '';
 
 create table product_ean_codes (
   id uuid primary key default uuid_generate_v4(),
@@ -104,6 +126,11 @@ create table product_ean_codes (
 );
 
 create index idx_ean_code on product_ean_codes(ean_code);
+
+-- Un modelo de batería solo puede tener un EAN (identificador único real de
+-- cada batería); dos modelos no pueden compartir EAN (ya lo impide el
+-- "unique" de ean_code de arriba).
+create unique index idx_product_ean_codes_one_per_model on product_ean_codes (product_model_id);
 
 -- ---------------------------------------------------------------------------
 -- ALMACÉN - STOCK CENTRAL (puede haber varios almacenes; uno especial para garantías)
@@ -202,6 +229,10 @@ create table driver_deliveries (
   delivered_by uuid references profiles(id) on delete set null,
   warehouse_id uuid not null references warehouses(id),
   status driver_order_status not null default 'pending',
+  -- 'conductor' = entrega normal (usa el código propio del conductor);
+  -- 'ofi' = entrega extraordinaria (usa el token OFI en el code de batería);
+  -- 'web' = pedido web (usa el token WEB en el code de batería).
+  delivery_type text not null default 'conductor' check (delivery_type in ('conductor', 'ofi', 'web')),
   delivered_at timestamptz not null default now(),
   responded_at timestamptz,
   rejection_acknowledged_at timestamptz, -- cuándo el almacenero/admin marcó como vista una entrega rechazada
@@ -245,6 +276,33 @@ create table driver_wallet_transactions (
 );
 
 -- ---------------------------------------------------------------------------
+-- CAJA DE OFICINA: dinero recaudado en ventas directas de almacén (no
+-- pertenece a ningún conductor concreto). Es una fila única (id=1) que
+-- funciona y se reinicia igual que la billetera de un conductor.
+-- ---------------------------------------------------------------------------
+create table office_wallet (
+  id integer primary key default 1,
+  cash_balance numeric(12,2) not null default 0,
+  card_balance numeric(12,2) not null default 0,
+  last_reset_at timestamptz,
+  last_reset_by uuid references profiles(id) on delete set null,
+  updated_at timestamptz not null default now(),
+  constraint office_wallet_singleton check (id = 1)
+);
+insert into office_wallet(id) values (1);
+
+create table office_wallet_transactions (
+  id uuid primary key default uuid_generate_v4(),
+  amount numeric(12,2) not null,
+  method payment_method not null,
+  type text not null default 'sale',
+  related_sale_id uuid,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  notes text
+);
+
+-- ---------------------------------------------------------------------------
 -- VENTAS (conductor unidad a unidad, comercial por factura, almacenero directo)
 -- ---------------------------------------------------------------------------
 create table sales (
@@ -260,6 +318,7 @@ create table sales (
   -- Datos adicionales de venta a cliente particular (conductor / almacenero directo)
   is_warranty boolean not null default false,          -- venta de garantía (0€ salvo diferencia)
   customer_vehicle_plate text,                          -- matrícula del coche del cliente
+  customer_vehicle_model text,                          -- modelo del coche del cliente
   old_battery_returned boolean,                          -- si el cliente entrega la batería vieja
   old_battery_reason text,                                -- motivo si NO la entrega
   sale_origin sale_origin_type not null default 'particular', -- particular / web / mapfre
@@ -276,8 +335,38 @@ create table sale_items (
   product_model_id uuid not null references product_models(id),
   ean_code text,
   quantity integer not null check (quantity > 0),
-  unit_price numeric(12,2)
+  unit_price numeric(12,2),
+  battery_unit_id uuid, -- fk añadida más abajo, tras crear battery_units
+  battery_code_manual text -- code escrito a mano cuando no viene de una entrega a conductor (p.ej. venta directa de almacén)
 );
+
+-- ---------------------------------------------------------------------------
+-- UNIDADES DE BATERÍA CON CÓDIGO PROPIO: cada batería física entregada a un
+-- conductor recibe su propio code (etiquetable/imprimible) con el formato
+-- MODELO + TOKEN(código del conductor | OFI | WEB) + DDMM + Nº(01,02...).
+-- Al montarla, el conductor escanea y elige su code exacto (ver fn_driver_sale).
+-- ---------------------------------------------------------------------------
+create table battery_units (
+  id uuid primary key default uuid_generate_v4(),
+  code text not null unique,
+  product_model_id uuid not null references product_models(id),
+  delivery_id uuid references driver_deliveries(id) on delete cascade,
+  driver_id uuid references profiles(id) on delete set null,
+  delivery_type text not null default 'conductor'
+    check (delivery_type in ('conductor', 'ofi', 'web')),
+  status text not null default 'assigned'
+    check (status in ('assigned', 'sold', 'returned', 'cancelled')),
+  sale_id uuid references sales(id) on delete set null,
+  created_at timestamptz not null default now(),
+  sold_at timestamptz
+);
+
+create index idx_battery_units_driver on battery_units(driver_id, product_model_id, status);
+create index idx_battery_units_delivery on battery_units(delivery_id);
+create index idx_battery_units_code on battery_units(code);
+
+alter table sale_items add constraint sale_items_battery_unit_id_fkey
+  foreign key (battery_unit_id) references battery_units(id);
 
 -- ---------------------------------------------------------------------------
 -- FACTURAS (generadas por el rol Comercial, precio editable, en blanco por defecto)
@@ -353,6 +442,37 @@ create table commercial_order_items (
 
 create index idx_commercial_orders_status on commercial_orders(status);
 create index idx_commercial_orders_pos on commercial_orders(point_of_sale_id);
+
+-- ---------------------------------------------------------------------------
+-- ENTREGA DE BATERÍAS VIEJAS (CHATARRA) DE COMERCIALES
+-- ---------------------------------------------------------------------------
+create table scrap_deliveries (
+  id uuid primary key default uuid_generate_v4(),
+  point_of_sale_id uuid not null references points_of_sale(id) on delete restrict,
+  quantity integer not null check (quantity > 0),
+  weight_kg numeric(8,2),  -- opcional
+  notes text,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index idx_scrap_deliveries_pos on scrap_deliveries(point_of_sale_id);
+create index idx_scrap_deliveries_created_at on scrap_deliveries(created_at);
+
+-- ---------------------------------------------------------------------------
+-- FIRMA DIGITAL AL ENTREGAR DESDE ALMACÉN (conductor, comercial, venta directa)
+-- ---------------------------------------------------------------------------
+create table delivery_signatures (
+  id uuid primary key default uuid_generate_v4(),
+  kind text not null check (kind in ('driver_delivery', 'commercial_order', 'warehouse_sale')),
+  reference_id uuid not null,
+  signer_name text,
+  notes text, -- observación de la entrega
+  signature_data_url text not null, -- PNG en base64 (data:image/png;base64,...)
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (kind, reference_id)
+);
+create index idx_delivery_signatures_ref on delivery_signatures(kind, reference_id);
 
 -- ---------------------------------------------------------------------------
 -- PRÉSTAMOS: salen del almacén sin ser una venta ni una entrega a conductor.
@@ -474,11 +594,14 @@ $$ language plpgsql security definer;
 
 -- 2) CREAR PEDIDO PARA CONDUCTOR (NO mueve stock: queda pendiente de que el
 --    conductor lo acepte o lo rechace). Puede llevar varias baterías o solo una.
+--    p_delivery_type: 'conductor' (normal) | 'ofi' (extraordinaria) | 'web'
+--    (pedido web) — solo determina el token usado en el code de cada batería.
 create or replace function fn_create_driver_order(
   p_warehouse_id uuid,
   p_driver_id uuid,
   p_items jsonb, -- [{"product_model_id": "...", "quantity": n}, ...]
-  p_notes text default null
+  p_notes text default null,
+  p_delivery_type text default 'conductor'
 ) returns uuid as $$
 declare
   v_delivery_id uuid;
@@ -488,6 +611,9 @@ declare
 begin
   if jsonb_array_length(p_items) = 0 then
     raise exception 'El pedido no puede estar vacío';
+  end if;
+  if p_delivery_type not in ('conductor', 'ofi', 'web') then
+    raise exception 'Tipo de entrega no válido';
   end if;
 
   for v_item in select * from jsonb_array_elements(p_items)
@@ -499,8 +625,8 @@ begin
     end if;
   end loop;
 
-  insert into driver_deliveries(driver_id, delivered_by, warehouse_id, notes, status)
-  values (p_driver_id, v_user, p_warehouse_id, p_notes, 'pending')
+  insert into driver_deliveries(driver_id, delivered_by, warehouse_id, notes, status, delivery_type)
+  values (p_driver_id, v_user, p_warehouse_id, p_notes, 'pending', p_delivery_type)
   returning id into v_delivery_id;
 
   for v_item in select * from jsonb_array_elements(p_items)
@@ -509,7 +635,72 @@ begin
     values (v_delivery_id, (v_item->>'product_model_id')::uuid, (v_item->>'quantity')::integer);
   end loop;
 
+  perform fn_generate_battery_units_for_delivery(v_delivery_id);
+
   return v_delivery_id;
+end;
+$$ language plpgsql security definer;
+
+-- 2z) GENERA LOS CÓDIGOS DE BATERÍA DE UNA ENTREGA (uno por unidad física).
+--     Formato: "<MODELO> <TOKEN><DD><MM><SEC>" p.ej. "TK720 SB220801".
+--     El nº de secuencia continúa a partir del último ya usado ese mismo día
+--     para el mismo modelo+token, así nunca se repite un code.
+create or replace function fn_generate_battery_units_for_delivery(p_delivery_id uuid)
+returns void as $$
+declare
+  v_driver_id uuid;
+  v_delivery_type text;
+  v_driver_token text;
+  v_item record;
+  v_model_token text;
+  v_dd text := to_char(now(), 'DD');
+  v_mm text := to_char(now(), 'MM');
+  v_next_seq integer;
+  v_i integer;
+  v_code text;
+begin
+  select driver_id, delivery_type into v_driver_id, v_delivery_type
+    from driver_deliveries where id = p_delivery_id;
+
+  if v_delivery_type is null then
+    v_delivery_type := 'conductor';
+  end if;
+
+  if v_delivery_type = 'ofi' then
+    v_driver_token := 'OFI';
+  elsif v_delivery_type = 'web' then
+    v_driver_token := 'WEB';
+  else
+    select upper(driver_code) into v_driver_token from profiles where id = v_driver_id;
+    if v_driver_token is null or trim(v_driver_token) = '' then
+      raise exception 'El conductor seleccionado todavía no tiene un código asignado. Configúralo en Usuarios antes de entregarle baterías.';
+    end if;
+  end if;
+
+  for v_item in
+    select product_model_id, quantity
+    from driver_delivery_items
+    where delivery_id = p_delivery_id
+  loop
+    if exists (select 1 from battery_units where delivery_id = p_delivery_id and product_model_id = v_item.product_model_id) then
+      continue;
+    end if;
+
+    select upper(regexp_replace(model_name, '\s+', '', 'g')) into v_model_token
+      from product_models where id = v_item.product_model_id;
+
+    select coalesce(max(substring(code from '(\d\d)$')::int), 0) into v_next_seq
+      from battery_units
+      where product_model_id = v_item.product_model_id
+        and code like (v_model_token || ' ' || v_driver_token || v_dd || v_mm || '%');
+
+    for v_i in 1..v_item.quantity loop
+      v_next_seq := v_next_seq + 1;
+      v_code := v_model_token || ' ' || v_driver_token || v_dd || v_mm || lpad(v_next_seq::text, 2, '0');
+      insert into battery_units(code, product_model_id, delivery_id, driver_id, delivery_type, status)
+      values (v_code, v_item.product_model_id, p_delivery_id, v_driver_id, v_delivery_type, 'assigned');
+    end loop;
+  end loop;
 end;
 $$ language plpgsql security definer;
 
@@ -706,7 +897,9 @@ create or replace function fn_driver_sale(
   p_old_battery_returned boolean default null,
   p_old_battery_reason text default null,
   p_sale_origin sale_origin_type default 'particular',
-  p_notes text default null
+  p_notes text default null,
+  p_battery_unit_id uuid default null,
+  p_customer_vehicle_model text default null
 ) returns uuid as $$
 declare
   v_sale_id uuid;
@@ -714,6 +907,9 @@ declare
   v_current_stock integer;
   v_method payment_method;
   v_total numeric;
+  v_unit_driver_id uuid;
+  v_unit_model_id uuid;
+  v_unit_status text;
 begin
   if p_quantity <= 0 then
     raise exception 'La cantidad debe ser mayor que 0';
@@ -729,6 +925,20 @@ begin
 
   if v_current_stock is null or v_current_stock < p_quantity then
     raise exception 'Stock insuficiente del conductor (disponible: %)', coalesce(v_current_stock, 0);
+  end if;
+
+  if p_battery_unit_id is not null then
+    select driver_id, product_model_id, status into v_unit_driver_id, v_unit_model_id, v_unit_status
+      from battery_units where id = p_battery_unit_id for update;
+    if v_unit_driver_id is null then
+      raise exception 'El code de batería indicado no existe';
+    end if;
+    if v_unit_driver_id <> p_driver_id or v_unit_model_id <> p_product_model_id then
+      raise exception 'El code de batería indicado no corresponde a este conductor/modelo';
+    end if;
+    if v_unit_status <> 'assigned' then
+      raise exception 'Esa batería ya no está disponible (code ya usado o devuelto)';
+    end if;
   end if;
 
   v_total := coalesce(p_amount_cash,0) + coalesce(p_amount_card,0);
@@ -752,13 +962,18 @@ begin
     where driver_id = p_driver_id and product_model_id = p_product_model_id;
 
   insert into sales(seller_id, sale_channel, payment_method, amount_cash, amount_card, total_amount, notes,
-                     is_warranty, customer_vehicle_plate, old_battery_returned, old_battery_reason, sale_origin)
+                     is_warranty, customer_vehicle_plate, customer_vehicle_model, old_battery_returned, old_battery_reason, sale_origin)
   values (p_driver_id, 'driver', v_method, coalesce(p_amount_cash,0), coalesce(p_amount_card,0), v_total, p_notes,
-          p_is_warranty, p_customer_vehicle_plate, p_old_battery_returned, p_old_battery_reason, p_sale_origin)
+          p_is_warranty, p_customer_vehicle_plate, p_customer_vehicle_model, p_old_battery_returned, p_old_battery_reason, p_sale_origin)
   returning id into v_sale_id;
 
-  insert into sale_items(sale_id, product_model_id, ean_code, quantity, unit_price)
-  values (v_sale_id, p_product_model_id, p_ean_code, p_quantity, v_total / p_quantity);
+  insert into sale_items(sale_id, product_model_id, ean_code, quantity, unit_price, battery_unit_id)
+  values (v_sale_id, p_product_model_id, p_ean_code, p_quantity, v_total / p_quantity, p_battery_unit_id);
+
+  if p_battery_unit_id is not null then
+    update battery_units set status = 'sold', sale_id = v_sale_id, sold_at = now()
+      where id = p_battery_unit_id;
+  end if;
 
   insert into driver_wallets(driver_id, cash_balance, card_balance)
   values (p_driver_id, coalesce(p_amount_cash,0), coalesce(p_amount_card,0))
@@ -799,7 +1014,9 @@ create or replace function fn_warehouse_sale(
   p_old_battery_returned boolean default null,
   p_old_battery_reason text default null,
   p_sale_origin sale_origin_type default 'particular',
-  p_notes text default null
+  p_notes text default null,
+  p_customer_vehicle_model text default null,
+  p_battery_code text default null
 ) returns uuid as $$
 declare
   v_sale_id uuid;
@@ -845,35 +1062,61 @@ begin
     where warehouse_id = p_warehouse_id and product_model_id = p_product_model_id;
 
   insert into sales(seller_id, sale_channel, payment_method, amount_cash, amount_card, total_amount, notes,
-                     is_warranty, customer_vehicle_plate, old_battery_returned, old_battery_reason, sale_origin)
+                     is_warranty, customer_vehicle_plate, customer_vehicle_model, old_battery_returned, old_battery_reason, sale_origin)
   values (p_seller_id, 'warehouse_direct', v_method, coalesce(p_amount_cash,0), coalesce(p_amount_card,0), v_total, p_notes,
-          p_is_warranty, p_customer_vehicle_plate, p_old_battery_returned, p_old_battery_reason, p_sale_origin)
+          p_is_warranty, p_customer_vehicle_plate, p_customer_vehicle_model, p_old_battery_returned, p_old_battery_reason, p_sale_origin)
   returning id into v_sale_id;
 
-  insert into sale_items(sale_id, product_model_id, ean_code, quantity, unit_price)
-  values (v_sale_id, p_product_model_id, p_ean_code, p_quantity, v_total / p_quantity);
+  insert into sale_items(sale_id, product_model_id, ean_code, quantity, unit_price, battery_code_manual)
+  values (v_sale_id, p_product_model_id, p_ean_code, p_quantity, v_total / p_quantity, nullif(trim(coalesce(p_battery_code, '')), ''));
 
-  insert into driver_wallets(driver_id, cash_balance, card_balance)
-  values (p_seller_id, coalesce(p_amount_cash,0), coalesce(p_amount_card,0))
-  on conflict (driver_id)
-  do update set
-    cash_balance = driver_wallets.cash_balance + coalesce(p_amount_cash,0),
-    card_balance = driver_wallets.card_balance + coalesce(p_amount_card,0),
-    updated_at = now();
+  -- El dinero de venta directa de almacén va a la caja de oficina (no a la
+  -- billetera personal de quien tenga la sesión iniciada).
+  update office_wallet
+    set cash_balance = cash_balance + coalesce(p_amount_cash,0),
+        card_balance = card_balance + coalesce(p_amount_card,0),
+        updated_at = now()
+    where id = 1;
 
   if p_amount_cash > 0 then
-    insert into driver_wallet_transactions(driver_id, amount, method, type, related_sale_id, created_by)
-    values (p_seller_id, p_amount_cash, 'cash', 'sale', v_sale_id, v_user);
+    insert into office_wallet_transactions(amount, method, type, related_sale_id, created_by)
+    values (p_amount_cash, 'cash', 'sale', v_sale_id, v_user);
   end if;
   if p_amount_card > 0 then
-    insert into driver_wallet_transactions(driver_id, amount, method, type, related_sale_id, created_by)
-    values (p_seller_id, p_amount_card, 'card', 'sale', v_sale_id, v_user);
+    insert into office_wallet_transactions(amount, method, type, related_sale_id, created_by)
+    values (p_amount_card, 'card', 'sale', v_sale_id, v_user);
   end if;
 
   insert into stock_movements(movement_type, product_model_id, quantity, from_location, to_location, reference_table, reference_id, performed_by)
   values ('sale_warehouse_direct', p_product_model_id, -p_quantity, 'warehouse', 'customer', 'sales', v_sale_id, v_user);
 
   return v_sale_id;
+end;
+$$ language plpgsql security definer;
+
+-- 5b) RESET DE CAJA DE OFICINA (solo admin, deja histórico)
+create or replace function fn_reset_office_wallet()
+returns void as $$
+declare
+  v_user uuid := auth.uid();
+  v_role user_role;
+  v_cash numeric;
+  v_card numeric;
+begin
+  select role into v_role from profiles where id = v_user;
+  if v_role is distinct from 'admin' then
+    raise exception 'Solo un administrador puede reiniciar la caja de oficina';
+  end if;
+
+  select cash_balance, card_balance into v_cash, v_card from office_wallet where id = 1;
+
+  insert into office_wallet_transactions(amount, method, type, created_by, notes)
+  values (-coalesce(v_cash,0), 'cash', 'reset', v_user, 'Reinicio de caja de oficina por administrador'),
+         (-coalesce(v_card,0), 'card', 'reset', v_user, 'Reinicio de caja de oficina por administrador');
+
+  update office_wallet
+    set cash_balance = 0, card_balance = 0, last_reset_at = now(), last_reset_by = v_user, updated_at = now()
+    where id = 1;
 end;
 $$ language plpgsql security definer;
 
@@ -1065,6 +1308,7 @@ declare
   v_warehouse_id uuid;
   v_item record;
   v_current_stock integer;
+  v_original_qty integer;
 begin
   select role into v_role from profiles where id = v_user;
   if v_role is distinct from 'admin' and v_role is distinct from 'almacenero' then
@@ -1083,6 +1327,22 @@ begin
     if jsonb_array_length(p_items) = 0 then
       raise exception 'El pedido no puede quedar vacío';
     end if;
+
+    -- No se puede superar, para un modelo que ya estaba en el pedido, la
+    -- cantidad originalmente pedida (si el pedido era de 100, no se puede
+    -- dar salida a 101 de ese modelo). Modelos nuevos añadidos al preparar
+    -- la salida no tienen tope aquí (solo el del stock, más abajo).
+    for v_item in
+      select (i->>'product_model_id')::uuid as product_model_id, (i->>'quantity')::integer as quantity
+      from jsonb_array_elements(p_items) as i
+    loop
+      select quantity into v_original_qty from commercial_order_items
+        where order_id = p_order_id and product_model_id = v_item.product_model_id;
+      if v_original_qty is not null and v_item.quantity > v_original_qty then
+        raise exception 'No puedes superar la cantidad pedida para ese modelo (pedidas: %, intentas dar salida a: %)', v_original_qty, v_item.quantity;
+      end if;
+    end loop;
+
     delete from commercial_order_items where order_id = p_order_id;
     insert into commercial_order_items(order_id, product_model_id, quantity)
     select p_order_id, (i->>'product_model_id')::uuid, (i->>'quantity')::integer
@@ -1491,6 +1751,18 @@ create policy driver_wallet_tx_read on driver_wallet_transactions for select
 create policy driver_wallet_tx_write on driver_wallet_transactions for insert
   with check (driver_id = auth.uid() or current_user_role() = 'admin');
 
+-- CAJA DE OFICINA (venta directa de almacén) — solo admin la consulta/gestiona
+alter table office_wallet enable row level security;
+alter table office_wallet_transactions enable row level security;
+create policy office_wallet_read on office_wallet for select
+  using (current_user_role() = 'admin');
+create policy office_wallet_write on office_wallet for all
+  using (current_user_role() in ('admin','almacenero'));
+create policy office_wallet_tx_read on office_wallet_transactions for select
+  using (current_user_role() = 'admin');
+create policy office_wallet_tx_write on office_wallet_transactions for insert
+  with check (current_user_role() in ('admin','almacenero'));
+
 -- VENTAS
 create policy sales_read on sales for select
   using (seller_id = auth.uid() or current_user_role() in ('admin','almacenero'));
@@ -1585,3 +1857,107 @@ insert into product_categories (name, slug) values ('Baterías', 'baterias');
 -- NOTA: crea el primer usuario admin desde Supabase Auth y luego ejecuta:
 -- insert into profiles (id, full_name, email, role)
 -- values ('<uuid-del-usuario-auth>', 'Nombre Admin', 'admin@tuempresa.com', 'admin');
+
+-- ============================================================================
+-- RLS: chatarra de comerciales y firmas de entrega
+-- ============================================================================
+alter table scrap_deliveries enable row level security;
+create policy scrap_deliveries_read on scrap_deliveries for select
+  using (current_user_role() in ('admin','almacenero','comercial'));
+create policy scrap_deliveries_write on scrap_deliveries for all
+  using (current_user_role() in ('admin','almacenero','comercial'));
+
+alter table delivery_signatures enable row level security;
+create policy delivery_signatures_read on delivery_signatures for select
+  using (
+    current_user_role() in ('admin','almacenero','comercial')
+    or (kind = 'driver_delivery' and exists (
+      select 1 from driver_deliveries d where d.id = reference_id and d.driver_id = auth.uid()
+    ))
+  );
+create policy delivery_signatures_write on delivery_signatures for insert
+  with check (current_user_role() in ('admin','almacenero','comercial'));
+
+-- ============================================================================
+-- AJUSTE DE INVENTARIO (contar y fijar stock real) — usado por "Hacer
+-- inventario" en Productos.
+-- ============================================================================
+create or replace function fn_set_warehouse_stock(
+  p_warehouse_id uuid,
+  p_product_model_id uuid,
+  p_new_quantity integer,
+  p_notes text default null
+) returns void as $$
+declare
+  v_user uuid := auth.uid();
+  v_role user_role;
+  v_current integer;
+  v_delta integer;
+begin
+  select role into v_role from profiles where id = v_user;
+  if v_role is distinct from 'admin' and v_role is distinct from 'almacenero' then
+    raise exception 'Solo el almacén o un administrador pueden ajustar el inventario';
+  end if;
+
+  if p_new_quantity < 0 then
+    raise exception 'La cantidad contada no puede ser negativa';
+  end if;
+
+  select quantity into v_current from warehouse_stock
+    where warehouse_id = p_warehouse_id and product_model_id = p_product_model_id
+    for update;
+
+  v_current := coalesce(v_current, 0);
+  v_delta := p_new_quantity - v_current;
+
+  insert into warehouse_stock(warehouse_id, product_model_id, quantity)
+  values (p_warehouse_id, p_product_model_id, p_new_quantity)
+  on conflict (warehouse_id, product_model_id)
+  do update set quantity = p_new_quantity, updated_at = now();
+
+  if v_delta <> 0 then
+    insert into stock_movements(movement_type, product_model_id, quantity, from_location, to_location, reference_table, performed_by)
+    values ('adjustment', p_product_model_id, v_delta, 'inventario', 'warehouse', 'inventory_count', v_user);
+  end if;
+end;
+$$ language plpgsql security definer;
+
+-- ============================================================================
+-- GRANTS EXPLÍCITOS PARA LA DATA API (Supabase deja de concederlos solo a
+-- partir del 30/oct/2026 para tablas nuevas). Ver migration_012 para el
+-- detalle y la plantilla a seguir en cada migración futura.
+-- ============================================================================
+do $$
+declare
+  t text;
+  tables text[] := array[
+    'profiles', 'product_categories', 'product_models', 'product_ean_codes',
+    'warehouses', 'warehouse_stock', 'suppliers', 'receptions', 'reception_items',
+    'points_of_sale', 'pos_stock', 'driver_stock', 'driver_deliveries',
+    'driver_delivery_items', 'battery_units', 'driver_wallets',
+    'driver_wallet_transactions', 'office_wallet', 'office_wallet_transactions',
+    'sales', 'sale_items', 'invoices', 'invoice_items', 'returns',
+    'commercial_orders', 'commercial_order_items', 'loans', 'loan_returns',
+    'stock_movements', 'scrap_deliveries', 'delivery_signatures'
+  ];
+begin
+  foreach t in array tables loop
+    execute format('grant select, insert, update, delete on public.%I to authenticated', t);
+    execute format('grant select, insert, update, delete on public.%I to service_role', t);
+  end loop;
+end $$;
+
+do $$
+declare
+  f record;
+begin
+  for f in
+    select p.proname, pg_get_function_identity_arguments(p.oid) as args
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname like 'fn\_%'
+  loop
+    execute format('grant execute on function public.%I(%s) to authenticated', f.proname, f.args);
+    execute format('grant execute on function public.%I(%s) to service_role', f.proname, f.args);
+  end loop;
+end $$;

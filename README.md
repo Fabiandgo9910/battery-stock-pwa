@@ -20,8 +20,11 @@ battery-stock-pwa/
 │                                 warehouse-sale, returns, commercial-sale,
 │                                 wallet-reset, product-models, users,
 │                                 points-of-sale, suppliers, invoices,
-│                                 admin/driver-overview, admin/daily-sales
-├── components/                ← BarcodeScanner, ConfirmModal (UI reutilizable)
+│                                 admin/driver-overview, admin/daily-sales,
+│                                 admin/office-wallet,
+│                                 exports/caja-conductores, exports/caja-comercial
+├── components/                ← BarcodeScanner, ConfirmModal, BatteryCodeLabels
+│                                 (etiquetas imprimibles de codes de batería), etc.
 ├── hooks/useProfile.ts        ← Hook de sesión/rol del usuario
 ├── lib/                       ← Clientes de Supabase (browser/server/route handler)
 ├── types/                     ← Tipos TypeScript del dominio
@@ -66,6 +69,34 @@ Node/Express o a Supabase Edge Functions sin tocar el resto.
         bug real de "la devolución de un préstamo da error" (mismo tipo de
         problema que las devoluciones: un CASE sin cast a un enum), y añade
         la entrega directa a una empresa desde la pantalla "Empresas".
+     11. `supabase/migration_010_battery_codes.sql` — código propio por
+        conductor, code individual por cada batería entregada (para
+        etiquetar/imprimir), escaneo obligatorio en entregas a conductor y
+        en salidas comerciales, selección del code exacto al montar/vender,
+        y la exportación de cajas en Excel. **Ver el detalle paso a paso en
+        la sección 8bis.**
+     12. `supabase/migration_011_office_wallet_and_fixes.sql` — modelo del
+        coche del cliente, code de batería manual en venta directa de
+        almacén, caja de oficina independiente (el dinero de venta directa
+        ya no se mezcla con la billetera personal de quien la registra), y
+        el tope de cantidad al dar salida a un pedido comercial (no se
+        puede superar lo pedido). **Ver el detalle paso a paso en la
+        sección 8ter.**
+     13. `supabase/migration_012_data_api_grants.sql` — **URGENTE**: da
+        permisos explícitos de la Data API a todas las tablas actuales
+        (aviso de Supabase, deja de concederlos solo para tablas nuevas a
+        partir del 30/oct/2026). Ver la sección 8quater — literalmente lo
+        primero que hay que ejecutar de todo esto.
+     14. `supabase/migration_013_catalog_scrap_signatures.sql` — ficha de
+        producto ampliada (medidas, peso, EAN, PVP...), entrega de baterías
+        viejas (chatarra) de comerciales, y firma digital en cualquier
+        entrega desde almacén. Ver la sección 8quinquies.
+     15. `supabase/migration_014_ean_unique_per_model.sql` — el EAN pasa a
+        ser el identificador único real de cada modelo (un modelo = un
+        EAN). Ver la sección 8sexies.
+     16. `supabase/migration_015_inventory_adjustment.sql` — función para
+        "Hacer inventario" (fija el stock contado físicamente). Ver la
+        sección 8sexies.
 
      Ninguna borra datos de negocio. Los pasos 3 y 4 tienen que ir
      **separados** a propósito: `ALTER TYPE ... ADD VALUE` (paso 3) no puede
@@ -272,6 +303,329 @@ Acceso total a todo lo de abajo, más:
   obligatoria).
 - También puede consultar **Salidas de almacén**, con los mismos filtros
   por empresa y fecha que ve el almacenero.
+
+---
+
+## 8bis. Novedades: códigos de batería y exportación de cajas
+
+Esta sección explica, paso a paso, el flujo nuevo añadido en
+`migration_010_battery_codes.sql`.
+
+### Paso 1 — Ejecuta la migración
+En Supabase → **SQL Editor**, pega y ejecuta el contenido completo de
+`supabase/migration_010_battery_codes.sql`. Es aditiva: no borra ni toca
+datos existentes.
+
+### Paso 2 — Asigna un código a cada conductor
+1. Entra como admin → **Usuarios**.
+2. Edita (o crea) cada conductor y rellena **Código de conductor** (2-4
+   letras, ej. `SB`). Es obligatorio para poder entregarle baterías: si no
+   lo tiene, la app avisa al intentar preparar una entrega.
+   - Debe ser único: dos conductores no pueden compartir código.
+
+### Paso 3 — Entregar baterías a un conductor (genera los codes)
+1. Almacén → **Entregar a conductor**.
+2. Selecciona el conductor y el **tipo de entrega**:
+   - *Conductor normal* → el code usa el código propio del conductor.
+   - *Extraordinaria (OFI)* → el code usa el token `OFI`.
+   - *Pedido WEB* → el code usa el token `WEB`.
+3. **Escanea** el código EAN de cada batería física que preparas (una vez
+   por unidad; si escaneas dos veces el mismo modelo, suma 2 al pedido). Si
+   el escáner falla, hay un enlace para buscar el modelo manualmente.
+4. Pulsa **Enviar pedido**. Se genera automáticamente un code por cada
+   batería, con el formato:
+
+   ```
+   MODELO + TOKEN + DD + MM + Nº (01, 02...)
+   Ejemplos: TK720 SB220801   ·   TK720 OFI220801   ·   TK720 WEB220801
+   ```
+
+   Si el pedido lleva 2 baterías del mismo modelo, la primera termina en
+   `01` y la segunda en `02` (y así sucesivamente); la numeración nunca se
+   repite para el mismo modelo+token+día, aunque sean pedidos distintos.
+5. Aparece una pantalla con todos los codes generados, lista para
+   **imprimir** (etiqueta cada batería física antes de que salga del
+   almacén).
+6. El stock del almacén **no se descuenta todavía**: el conductor tiene que
+   aceptar el pedido desde su móvil (igual que antes). Si lo rechaza, esos
+   codes quedan anulados automáticamente.
+
+### Paso 4 — Montar/vender la batería (elegir su code exacto)
+1. Conductor → **Vender**, escanea el EAN del modelo como siempre.
+2. Si ese modelo tiene codes suyos pendientes de montar, aparece un
+   desplegable **"Code de la batería que vas a montar"**: mira el code
+   pegado en la batería física y selecciónalo.
+3. Al confirmar la venta, ese code queda marcado como vendido y guardado en
+   la venta — es lo que luego aparece en la columna **"Nº BATERIA"** del
+   Excel de caja de conductores.
+
+> Si un modelo no tiene ningún code disponible (por ejemplo, stock antiguo
+> de antes de esta actualización), la venta se puede completar igual, sin
+> seleccionar code.
+
+### Paso 5 — Salidas comerciales también escanean
+En **Pedidos comerciales → Preparar y dar salida**, ahora hay que escanear
+al menos una batería física (con el mismo fallback manual) antes de poder
+dar salida. **Solicitar pedido** (el conductor pidiendo al almacén) sigue
+sin necesitar escáner, tal cual estaba.
+
+> La exportación de cajas (una por conductor, otra comercial) está
+> explicada en la sección 8ter, junto con el resto de novedades de esa
+> migración.
+
+---
+
+## 8ter. Novedades: modelo del coche, caja de oficina y tope de pedidos
+
+Esta sección explica lo añadido en
+`migration_011_office_wallet_and_fixes.sql`.
+
+### Paso 1 — Ejecuta la migración
+En Supabase → **SQL Editor**, ejecuta
+`supabase/migration_011_office_wallet_and_fixes.sql` (aditiva, no borra
+nada).
+
+### Paso 2 — Modelo del coche del cliente
+Tanto en **conductor → Vender** como en **almacén → Venta directa**, ahora
+hay un campo **Modelo del coche** junto a la matrícula (opcional).
+
+### Paso 3 — Venta directa de almacén: code de batería
+En **Venta directa** ahora se puede escribir directamente el **code de
+batería** (texto libre, ya que esta venta no pasa por el sistema de codes
+generado en las entregas a conductor). Aparecerá en la exportación de caja
+de conductores, columna "Nª BATERIA".
+
+### Paso 4 — Caja de oficina
+El dinero cobrado en **venta directa de almacén** ya no se mezcla con la
+billetera personal de quien tenga la sesión iniciada: va a una **caja de
+oficina** única. Se ve y se reinicia igual que las cajas de conductores, en
+**Admin → Cajas de conductores** (arriba del todo, tarjeta "🏢 Caja de
+oficina").
+
+### Paso 5 — La caja de conductores ahora también incluye venta directa
+El Excel de **caja conductores** (exportado desde Ventas del día) incluye
+tanto las ventas de conductores como las **ventas directas de almacén**,
+para que todo el dinero de caja de conductores quede en un solo sitio.
+
+### Paso 6 — Caja comercial: se unifica por empresa + modelo
+Si en el periodo exportado una misma empresa se ha llevado el mismo modelo
+varias veces (en salidas o pedidos distintos), el Excel de **caja
+comercial** unifica esas líneas en una sola, sumando las cantidades.
+
+### Paso 7 — Tope al dar salida a un pedido comercial
+En **Pedidos comerciales → Preparar y dar salida**, ya no se puede escanear
+o escribir más unidades de las que se pidieron para un modelo que ya
+estaba en el pedido (si pedían 100, no se puede dar salida a 101 de ese
+modelo). Si añades un modelo nuevo que no estaba en el pedido original, ese
+sí puedes meterlo con la cantidad que necesites (solo limitado por el
+stock disponible).
+
+### Paso 8 — Nueva salida directa a una empresa, sin pedido comercial
+En **Salidas de almacén** hay ahora un botón **+ Nueva salida directa**
+(la misma función que ya existía en "Empresas", ahora también accesible
+desde aquí) para entregar baterías a una empresa al momento, sin tener que
+crear antes un pedido comercial pendiente.
+
+### Paso 9 — "Nuevo pedido comercial" ahora vive en "Pedidos comerciales"
+Ya no hay una pantalla separada de "Nuevo pedido comercial": todo está en
+**Pedidos comerciales**. El botón **+ Nuevo pedido** solo aparece para
+comercial y admin; almacenero solo ve la parte de preparar/dar salida
+(admin ve las dos).
+
+---
+
+## 8quater. URGENTE: aviso de Supabase sobre la Data API (léelo antes de nada)
+
+Supabase te ha avisado de que, a partir del **30 de octubre**, deja de conceder
+automáticamente acceso a la Data API (la que usa esta app a través de
+`supabase-js`) a las tablas **nuevas** que se creen en el schema `public`.
+Las tablas que ya tienes hoy **no se ven afectadas** — pero para dejarlo
+resuelto de una vez y no tener sustos con futuras migraciones:
+
+### Paso 1 — Ejecuta ya la migración de permisos
+En Supabase → **SQL Editor**, ejecuta `supabase/migration_012_data_api_grants.sql`.
+- Es 100% segura: solo concede permisos (`GRANT`), no toca datos ni estructuras.
+- Es reejecutable sin problema.
+- Dejas así, de forma explícita, todas las tablas actuales con acceso para
+  `authenticated` (usuarios con sesión) y `service_role` (usado por las
+  rutas `/api` que actúan como admin). A propósito **no** se concede nada a
+  `anon` (usuarios sin sesión) — esta app exige login para todo, así que es
+  más seguro no dar ni ese permiso mínimo.
+
+### Paso 2 — Regla para TODA migración futura
+De aquí en adelante, cualquier migración que cree una tabla nueva **tiene
+que incluir sus `GRANT` en la misma migración**, o esa tabla quedará
+inalcanzable por la Data API a partir del 30 de octubre. La plantilla exacta
+está al final de `migration_012_data_api_grants.sql`:
+
+```sql
+grant select, insert, update, delete on public.mi_tabla_nueva to authenticated;
+grant select, insert, update, delete on public.mi_tabla_nueva to service_role;
+```
+
+Las migraciones `013` (chatarra, firmas, catálogo ampliado) que se incluyen
+en esta misma entrega **ya siguen esta regla** — sirven de ejemplo.
+
+### Paso 3 — Verifica que no se te ha quedado ninguna
+En Supabase → **Project Settings → Data API**, revisa el listado de tablas
+expuestas. Si alguna vez ves un error "permission denied" con el `GRANT`
+exacto a ejecutar, es que esa tabla se creó sin este paso — copia y ejecuta
+el `GRANT` que te indica el propio error.
+
+---
+
+## 8quinquies. Novedades de esta entrega: chatarra, firmas, catálogo e import/export
+
+### A) Entrega de baterías viejas (chatarra) de comerciales
+En **Salidas de almacén**, botón **"🔋 Registrar entrega de baterías viejas
+(chatarra)"**: eliges la empresa, cuántas deja, y opcionalmente el peso en
+kg. Se exporta automáticamente en el Excel de **caja comercial** (botón
+"Exportar caja comercial" en esa misma pantalla), como una **segunda
+pestaña** llamada "CHATARRA" dentro del mismo archivo — mismo Excel, dos
+hojas: una para la caja y otra para la chatarra, cada una imprimible desde
+Excel normalmente.
+
+### B) Impresión de codes de batería corregida (impresoras de etiquetas)
+El problema anterior era que la zona de impresión estaba metida dentro de
+una ventana con scroll, así que al imprimir se recortaba, y además usaba un
+diseño de "varias etiquetas por hoja A4" que no tiene sentido para una
+impresora de pegatinas (que trata cada etiqueta como una página física).
+
+Ahora, al generar los codes en **Entregar a conductor**, la pantalla de
+impresión:
+- Deja elegir el **tamaño de tu etiqueta** (60×40mm, 58×40mm, 50×30mm,
+  40×30mm, 100×50mm, o "Hoja A4" si prefieres imprimir varias en una hoja
+  normal).
+- Imprime **una batería por página física**, ajustando el tamaño de página
+  (`@page`) exactamente a ese tamaño — así encaja con el rollo de tu
+  impresora de etiquetas.
+- Ya no depende de ningún contenedor con scroll, así que no se recorta.
+
+Si tu impresora de etiquetas tiene un tamaño distinto a los de la lista,
+dilo y te añado ese tamaño exacto a la lista.
+
+### C) Firma digital en toda entrega desde almacén
+Antes de completar cualquiera de estas tres acciones, ahora se pide la
+firma de quien recibe (con el dedo en el móvil, con un panel táctil de
+firmas USB, o con lápiz óptico — todos funcionan igual, es solo una zona
+táctil) y una observación de esa entrega concreta:
+
+- **Entregar a conductor** (tanto si lo prepara el almacén como si lo pidió
+  el conductor, en **Pedidos de conductores**).
+- **Pedidos comerciales → Preparar y dar salida**.
+- **Venta directa de almacén**.
+- **Nueva salida directa a empresa** (desde Salidas de almacén o Empresas).
+
+La firma queda guardada (imagen + nombre de quien firma + observación +
+fecha) y se puede volver a ver con el botón **"Ver firma"** que aparece
+junto a cada entrega ya realizada (en Salidas de almacén y en Pedidos de
+conductores).
+
+### D) Exportar / importar el catálogo completo del almacén
+En **Productos**, arriba del todo:
+- **Exportar catálogo**: descarga un Excel con TODOS los modelos, su stock
+  en el almacén central, y todas sus propiedades (EAN, referencia,
+  polaridad, medidas, caja, sujeción, peso, embalaje/palet, PVP...).
+- **Importar catálogo** (solo admin): sube un Excel con el mismo formato
+  (mismas columnas, en cualquier orden) para crear o actualizar modelos en
+  bloque, incluido el EAN y el stock. No borra nada que no venga en el
+  Excel — solo crea o actualiza. Al terminar, muestra cuántos se crearon,
+  cuántos se actualizaron, y cualquier aviso (p. ej. un EAN duplicado).
+
+Cómo empareja cada fila con un modelo ya existente (por este orden): por
+EAN → si no, por referencia (columna REFERENCIA) → si no, por marca+modelo
+→ si no coincide con nada, crea un modelo nuevo.
+
+### E) Catálogo de Tudor ya convertido y listo para importar
+Adjunto a esta entrega tienes `catalogo_tudor_para_importar.xlsx`: es tu
+Excel `TUDORJULIO2026.xlsx` ya convertido al formato exacto que espera la
+importación (101 baterías, con EAN, referencia, medidas, peso, PVP, etc.).
+Para cargarlo:
+1. Entra como admin → **Productos**.
+2. Botón **Importar catálogo** → selecciona `catalogo_tudor_para_importar.xlsx`.
+3. Revisa el resumen (creados/actualizados/avisos).
+
+**Nota:** en ese archivo la columna STOCK_ALMACEN se ha dejado **vacía a
+propósito** (es la lista de fabricante, no tu stock real), así que
+importarlo NO toca las cantidades que ya tengas en el almacén — solo crea o
+actualiza las fichas de producto (medidas, peso, EAN, PVP, etc.). Si más
+adelante quieres fijar el stock real de estos modelos desde Excel, exporta
+el catálogo actual (para tener las cantidades de verdad), edita esa
+columna, y vuelve a importarlo.
+
+---
+
+## 8sexies. Novedades de esta entrega: EAN único, paginación, firmas, inventario y estadísticas
+
+### A) Migración a ejecutar
+En Supabase → SQL Editor, ejecuta `supabase/migration_014_ean_unique_per_model.sql`
+y luego `supabase/migration_015_inventory_adjustment.sql` (en ese orden). La
+014 comprueba antes de bloquear nada: si algún modelo tuviera ya hoy más de
+un EAN, el propio archivo te dice qué SQL ejecutar primero para verlo y
+arreglarlo a mano (no borra nada solo, para no perder datos por sorpresa).
+
+### B) El EAN es ahora el identificador único de cada modelo
+- Un modelo de batería solo puede tener **un** EAN, y un EAN solo puede
+  pertenecer a **un** modelo (ya lo impedía el `unique`, ahora también lo
+  impide al revés).
+- Al **importar** el catálogo: si el EAN de una fila ya existe, se
+  **actualiza ese modelo y su stock** (no se crea uno nuevo). Si el EAN no
+  existe, se crea el modelo y se le asigna. Filas sin EAN se saltan (el EAN
+  es obligatorio para importar, precisamente porque es la clave única).
+
+### C) Impresión de etiquetas corregida de verdad
+El fallo era que el bloque de impresión estaba metido DENTRO de la ventana
+del modal, y esa ventana se oculta al imprimir (`display:none`) — así que
+se llevaba la zona de impresión con ella y salía la hoja en blanco. Ahora el
+bloque de impresión es independiente del modal, así que no puede quedar
+oculto por error. Debería imprimir bien en tu impresora de etiquetas.
+
+### D) Ver detalles de cada modelo
+En **Productos**, cada modelo tiene un botón **"Ver detalles"** con toda su
+ficha completa (EAN, referencia, medidas, peso, caja, sujeción, embalaje,
+PVP...), la misma información que trae el Excel del catálogo.
+
+### E) Hacer inventario
+En **Productos**, botón **"📋 Hacer inventario"**: escaneas cada batería,
+compruebas que es el modelo correcto, escribes la cantidad que has contado
+y se **fija** el stock a ese número exacto (no se suma). Queda registrado
+como ajuste de inventario en el histórico de movimientos.
+
+### F) Paginación de verdad (en servidor)
+Antes, varias listas traían TODos los registros y los recortaban en el
+navegador — funcionaba, pero pedía de más según crecía la tabla. Ahora:
+- **Productos, Usuarios, Empresas**: paginación real en servidor (cada
+  página pide solo esos registros a la base de datos).
+- **El buscador de modelos** (usado en Entregar a conductor, Pedidos
+  comerciales, Entrega directa...) ya no descarga el catálogo entero: busca
+  en el servidor a medida que escribes.
+- **Chatarra**: lista paginada igual que las demás.
+
+El resto de listas del sistema quedan para una siguiente pasada (dilo si
+hay alguna que notes especialmente lenta y la priorizamos).
+
+### G) Firma también en la venta del conductor, y "Ver firma" en Ventas del día
+- Al vender/montar una batería, el conductor también pide ahora la firma del
+  cliente (como ya pasaba en las entregas del almacén).
+- En **Ventas del día**, botón **"Ver ventas"** por vendedor: abre el
+  listado de sus ventas individuales de ese día, cada una con su propio
+  botón **"Ver firma"**.
+
+### H) Resumen con gráficas en el inicio
+- **Admin**: al entrar, ve un panel con filtro de fechas (Hoy / 7 días / 30
+  días / este mes / rango manual) y gráficas (librería `recharts`):
+  baterías vendidas por conductor, más vendidas, por origen (particular/web/
+  Mapfre), y por empresa comercial — más las tarjetas de garantías puestas y
+  ventas directas de almacén.
+- **Conductor**: en su propio inicio ve, con el mismo filtro de fechas,
+  cuántas ha vendido en total, cuántas web, cuántas Mapfre y cuántas de
+  garantía.
+
+### I) Chatarra: exportar por día, junto a donde se registra
+En **Chatarra (baterías viejas)** (antes solo un botón dentro de Salidas de
+almacén, ahora su propia página) tienes en la misma pantalla: el formulario
+para registrar una entrega, el listado paginado de las ya registradas, y el
+selector de fechas + botón para exportar el Excel de ese rango.
 
 ---
 

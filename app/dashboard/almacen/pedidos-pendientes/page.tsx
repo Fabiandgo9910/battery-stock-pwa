@@ -6,6 +6,8 @@ import { usePagination } from '@/hooks/usePagination';
 import ConfirmModal from '@/components/ConfirmModal';
 import ModelPicker from '@/components/ModelPicker';
 import QuantityInput from '@/components/QuantityInput';
+import SignatureStep, { SignatureResult } from '@/components/SignatureStep';
+import SignatureViewer from '@/components/SignatureViewer';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import type { ProductModel } from '@/types/domain';
@@ -57,6 +59,9 @@ export default function PedidosPendientesPage() {
   const [processing, setProcessing] = useState<Order | null>(null);
   const [editItems, setEditItems] = useState<EditItem[]>([]);
   const [editNotes, setEditNotes] = useState('');
+  const [showProcessConfirm, setShowProcessConfirm] = useState(false);
+  const [showProcessSignature, setShowProcessSignature] = useState(false);
+  const [signatureOrder, setSignatureOrder] = useState<Order | null>(null);
 
 
   async function load() {
@@ -121,7 +126,7 @@ export default function PedidosPendientesPage() {
     setEditItems((prev) => prev.filter((i) => i.product_model.id !== id));
   }
 
-  async function confirmProcess() {
+  async function confirmProcess(signature: SignatureResult) {
     if (!processing) return;
     const items = editItems.filter((i) => i.quantity > 0);
     if (items.length === 0) {
@@ -134,15 +139,27 @@ export default function PedidosPendientesPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         items: items.map((i) => ({ product_model_id: i.product_model.id, quantity: i.quantity })),
-        notes: editNotes || undefined,
+        notes: editNotes || signature.notes || undefined,
       }),
     });
     const json = await res.json().catch(() => ({}));
     setSubmitting(false);
+    setShowProcessSignature(false);
     if (!res.ok) {
       toast.error(json.error || 'Error al procesar el pedido.');
       return;
     }
+    await fetch('/api/signatures', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'driver_delivery',
+        reference_id: processing.id,
+        signer_name: signature.signerName || undefined,
+        notes: signature.notes || editNotes || undefined,
+        signature_data_url: signature.signatureDataUrl,
+      }),
+    }).catch(() => {});
     toast.success('Pedido preparado y enviado al conductor para que lo acepte.');
     setProcessing(null);
     load();
@@ -209,6 +226,9 @@ export default function PedidosPendientesPage() {
             {order.notes && <p className="mt-2 text-xs text-slate-400">Nota: {order.notes}</p>}
             <div className="mt-3 flex flex-wrap gap-2">
               <button className="btn-secondary" onClick={() => setDetailsOrder(order)}>Ver detalles</button>
+              {order.status !== 'requested' && (
+                <button className="btn-secondary" onClick={() => setSignatureOrder(order)}>Ver firma</button>
+              )}
               {order.status === 'requested' && (
                 <button className="btn-charge" onClick={() => startProcessing(order)}>Preparar y enviar</button>
               )}
@@ -257,6 +277,14 @@ export default function PedidosPendientesPage() {
         </div>
       )}
 
+      {signatureOrder && (
+        <SignatureViewer
+          kind="driver_delivery"
+          referenceId={signatureOrder.id}
+          onClose={() => setSignatureOrder(null)}
+        />
+      )}
+
       {/* Modal de procesar/preparar */}
       {processing && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
@@ -299,12 +327,35 @@ export default function PedidosPendientesPage() {
 
             <div className="mt-6 flex gap-3">
               <button className="btn-secondary flex-1" onClick={() => setProcessing(null)}>Cancelar</button>
-              <button className="btn-charge flex-1" disabled={submitting} onClick={confirmProcess}>
-                {submitting ? 'Enviando…' : 'Enviar al conductor'}
+              <button className="btn-charge flex-1" disabled={submitting} onClick={() => setShowProcessConfirm(true)}>
+                Enviar al conductor
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      <ConfirmModal
+        open={showProcessConfirm}
+        title="Enviar pedido al conductor"
+        description="Se generará un code por cada batería y se pedirá la firma de quien la recibe antes de enviar el pedido."
+        confirmLabel="Continuar"
+        onConfirm={() => {
+          setShowProcessConfirm(false);
+          setShowProcessSignature(true);
+        }}
+        onCancel={() => setShowProcessConfirm(false)}
+      />
+
+      {showProcessSignature && (
+        <SignatureStep
+          title="Firma de quien recibe la entrega"
+          description={`${processing?.driver?.full_name ?? 'El conductor'} firma que recibe físicamente las baterías.`}
+          confirmLabel="Confirmar y enviar pedido"
+          submitting={submitting}
+          onConfirm={confirmProcess}
+          onCancel={() => setShowProcessSignature(false)}
+        />
       )}
 
       <ConfirmModal

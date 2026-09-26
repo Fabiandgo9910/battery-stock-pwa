@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ProductModel } from '@/types/domain';
 
 interface ModelPickerProps {
@@ -9,28 +9,46 @@ interface ModelPickerProps {
 }
 
 /**
- * Buscador sencillo de modelos de producto por referencia (marca/modelo),
- * sin cámara ni escáner — para crear o editar pedidos, donde no hace falta
- * tener la batería físicamente delante, solo elegir qué y cuánto.
- * Lista todos los modelos que alguna vez se han dado de alta en el catálogo.
+ * Buscador de modelos de producto por referencia (marca/modelo/EAN/GPN), sin
+ * cámara ni escáner. Busca en el servidor a medida que escribes (con
+ * debounce), en vez de descargar todo el catálogo de golpe — importante
+ * porque este componente se usa en muchas pantallas distintas.
  */
 export default function ModelPicker({ onSelect, label = 'Buscar por referencia (marca / modelo)' }: ModelPickerProps) {
-  const [models, setModels] = useState<ProductModel[]>([]);
+  const [results, setResults] = useState<ProductModel[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    fetch('/api/product-models')
-      .then((r) => r.json())
-      .then((json) => setModels(json.product_models ?? []))
-      .catch(() => {});
-  }, []);
-
-  const filtered = search.trim()
-    ? models
-        .filter((m) => `${m.brand} ${m.model_name}`.toLowerCase().includes(search.toLowerCase()))
-        .slice(0, 8)
-    : [];
+    if (!search.trim()) {
+      setResults([]);
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setLoading(true);
+      fetch(`/api/product-models?search=${encodeURIComponent(search.trim())}&pageSize=8`, { signal: controller.signal })
+        .then((r) => r.json())
+        .then((json) => {
+          if (!controller.signal.aborted) setResults(json.product_models ?? []);
+        })
+        .catch((err) => {
+          if (err?.name !== 'AbortError') console.error(err);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    }, 250);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search]);
 
   return (
     <div className="relative">
@@ -45,11 +63,12 @@ export default function ModelPicker({ onSelect, label = 'Buscar por referencia (
         }}
         onFocus={() => setOpen(true)}
       />
-      {open && filtered.length > 0 && (
+      {open && search.trim() && (loading || results.length > 0) && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
-            {filtered.map((m) => (
+            {loading && <p className="px-3 py-2.5 text-sm text-slate-400">Buscando…</p>}
+            {!loading && results.map((m) => (
               <button
                 key={m.id}
                 type="button"
@@ -67,7 +86,7 @@ export default function ModelPicker({ onSelect, label = 'Buscar por referencia (
           </div>
         </>
       )}
-      {open && search.trim() && filtered.length === 0 && (
+      {open && search.trim() && !loading && results.length === 0 && (
         <p className="mt-1 text-xs text-slate-400">Sin resultados. Da de alta el modelo desde Recepción primero.</p>
       )}
     </div>

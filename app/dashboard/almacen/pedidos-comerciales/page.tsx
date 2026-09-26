@@ -6,6 +6,8 @@ import { usePagination } from '@/hooks/usePagination';
 import ConfirmModal from '@/components/ConfirmModal';
 import ModelPicker from '@/components/ModelPicker';
 import QuantityInput from '@/components/QuantityInput';
+import BarcodeScanner from '@/components/BarcodeScanner';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import toast from 'react-hot-toast';
 import type { ProductModel } from '@/types/domain';
 
@@ -55,6 +57,9 @@ export default function PedidosComercialesPage() {
   const [editItems, setEditItems] = useState<EditItem[]>([]);
   const [dispatchConfirmOpen, setDispatchConfirmOpen] = useState(false);
   const [photosChecked, setPhotosChecked] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [looking, setLooking] = useState(false);
+  const [scannedCount, setScannedCount] = useState(0);
 
   async function load() {
     setLoading(true);
@@ -71,6 +76,8 @@ export default function PedidosComercialesPage() {
   function startProcessing(order: Order) {
     setProcessing(order);
     setPhotosChecked(false);
+    setManualMode(false);
+    setScannedCount(0);
     setEditItems(
       order.commercial_order_items.map((it) => ({
         product_model: { id: it.product_model_id, brand: it.product_model?.brand ?? '', model_name: it.product_model?.model_name ?? '' } as ProductModel,
@@ -85,6 +92,30 @@ export default function PedidosComercialesPage() {
       return;
     }
     setEditItems((prev) => [...prev, { product_model: model, quantity: 0 }]);
+  }
+
+  async function handleScan(code: string) {
+    setLooking(true);
+    try {
+      const res = await fetch(`/api/reception/lookup?ean=${encodeURIComponent(code)}`);
+      const json = await res.json();
+      if (!json.found) {
+        toast.error('Código no reconocido en el catálogo.');
+        return;
+      }
+      const model: ProductModel = json.product_model;
+      setEditItems((prev) => {
+        const existing = prev.find((i) => i.product_model.id === model.id);
+        if (existing) {
+          return prev.map((i) => (i.product_model.id === model.id ? { ...i, quantity: i.quantity + 1 } : i));
+        }
+        return [...prev, { product_model: model, quantity: 1 }];
+      });
+      setScannedCount((c) => c + 1);
+      toast.success(`Escaneada: ${model.brand} ${model.model_name}`);
+    } finally {
+      setLooking(false);
+    }
   }
 
   function updateQty(id: string, qty: number) {
@@ -220,11 +251,26 @@ export default function PedidosComercialesPage() {
               Preparar salida para {processing.point_of_sale?.name}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Edita cantidades o busca por referencia para añadir un modelo que no estuviera en el
-              pedido original.
+              Escanea el código EAN de cada batería física que sacas del almacén. Si el escáner
+              falla, puedes buscar el modelo manualmente.
             </p>
             <div className="mt-4">
-              <ModelPicker onSelect={handleSelect} />
+              <ErrorBoundary fallbackTitle="No se pudo iniciar la cámara. Comprueba los permisos o usa un lector físico.">
+                <BarcodeScanner active={!manualMode} onScan={handleScan} />
+              </ErrorBoundary>
+              {looking && <p className="mt-2 text-center text-sm text-charge-700">Buscando modelo…</p>}
+              <button
+                type="button"
+                className="mt-2 text-xs text-slate-400 underline"
+                onClick={() => setManualMode((m) => !m)}
+              >
+                {manualMode ? 'Volver al escáner' : '¿El escáner no funciona? Buscar manualmente'}
+              </button>
+              {manualMode && (
+                <div className="mt-3">
+                  <ModelPicker onSelect={handleSelect} />
+                </div>
+              )}
             </div>
             <div className="mt-4 space-y-2">
               {editItems.map((item) => (
@@ -260,6 +306,10 @@ export default function PedidosComercialesPage() {
               <button
                 className="btn-charge flex-1"
                 onClick={() => {
+                  if (scannedCount === 0) {
+                    toast.error('Escanea al menos una batería antes de dar salida.');
+                    return;
+                  }
                   if (!photosChecked) {
                     toast.error('Marca la casilla de fotos antes de dar salida.');
                     return;

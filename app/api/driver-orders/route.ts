@@ -14,6 +14,7 @@ const bodySchema = z.object({
     )
     .min(1),
   notes: z.string().optional(),
+  delivery_type: z.enum(['conductor', 'ofi', 'web']).default('conductor'),
 });
 
 // POST /api/driver-orders -> crea un pedido para un conductor (admin/almacenero).
@@ -40,10 +41,20 @@ export async function POST(req: NextRequest) {
       p_driver_id: body.driver_id,
       p_items: body.items,
       p_notes: body.notes ?? null,
+      p_delivery_type: body.delivery_type,
     });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ delivery_id: data });
+
+    // Devolvemos también los codes de batería generados para poder
+    // imprimirlos/etiquetarlos en el momento.
+    const { data: batteryUnits } = await supabase
+      .from('battery_units')
+      .select('id, code, product_model_id, product_model:product_models(brand, model_name)')
+      .eq('delivery_id', data)
+      .order('code');
+
+    return NextResponse.json({ delivery_id: data, battery_units: batteryUnits ?? [] });
   } catch (err) {
     console.error('POST /api/driver-orders', err);
     return NextResponse.json(

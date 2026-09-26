@@ -27,3 +27,29 @@ html, body {
     @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500;
   }
 }
+
+/* Al imprimir (etiquetas de baterías, cajas conductores/comercial), solo se
+   ve el contenido marcado explícitamente para impresión. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #battery-labels-print-root,
+  #battery-labels-print-root *,
+  #printable-report,
+  #printable-report * {
+    visibility: visible;
+  }
+  #battery-labels-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  #printable-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

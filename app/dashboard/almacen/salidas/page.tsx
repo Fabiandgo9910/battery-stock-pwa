@@ -3,6 +3,10 @@
 import { useEffect, useState } from 'react';
 import Pagination from '@/components/Pagination';
 import { usePagination } from '@/hooks/usePagination';
+import Link from 'next/link';
+import DirectDeliveryModal from '@/components/DirectDeliveryModal';
+import SignatureViewer from '@/components/SignatureViewer';
+import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
 
 interface OrderItem {
@@ -31,13 +35,21 @@ export default function SalidasAlmacenPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [detailsOrder, setDetailsOrder] = useState<DispatchedOrder | null>(null);
+  const [warehouseId, setWarehouseId] = useState('');
+  const [showDirectDelivery, setShowDirectDelivery] = useState(false);
+  const [signatureOrder, setSignatureOrder] = useState<DispatchedOrder | null>(null);
 
   useEffect(() => {
     async function loadPos() {
       const { data } = await supabase.from('points_of_sale').select('id, name').order('name');
       setPointsOfSale(data ?? []);
     }
+    async function loadWarehouse() {
+      const { data: wh } = await supabase.from('warehouses').select('*').eq('active', true).eq('is_warranty_holding', false).limit(1).single();
+      if (wh) setWarehouseId(wh.id);
+    }
     loadPos();
+    loadWarehouse();
   }, [supabase]);
 
   async function load() {
@@ -61,6 +73,14 @@ export default function SalidasAlmacenPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posFilter, fromDate, toDate]);
 
+  function exportCajaComercial() {
+    if (!fromDate || !toDate) {
+      toast.error('Selecciona un rango de fechas (desde/hasta) para exportar.');
+      return;
+    }
+    window.open(`/api/exports/caja-comercial?from=${fromDate}&to=${toDate}`, '_blank');
+  }
+
   const totalUnits = orders.reduce(
     (sum, o) => sum + o.commercial_order_items.reduce((s, i) => s + i.quantity, 0),
     0
@@ -70,11 +90,24 @@ export default function SalidasAlmacenPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-semibold text-slate-900">Salidas de almacén</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Todas las salidas hacia empresas y talleres (pedidos comerciales ya despachados). Filtra por
-        empresa y por fecha.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Salidas de almacén</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Todas las salidas hacia empresas y talleres (pedidos comerciales ya despachados). Filtra por
+            empresa y por fecha.
+          </p>
+        </div>
+        <button className="btn-charge whitespace-nowrap" onClick={() => setShowDirectDelivery(true)}>
+          + Nueva salida directa
+        </button>
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <Link href="/dashboard/almacen/chatarra" className="btn-secondary whitespace-nowrap inline-block">
+          🔋 Entrega de baterías viejas (chatarra)
+        </Link>
+      </div>
 
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <select className="input-field" value={posFilter} onChange={(e) => setPosFilter(e.target.value)}>
@@ -85,6 +118,10 @@ export default function SalidasAlmacenPage() {
         </select>
         <input type="date" className="input-field" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
         <input type="date" className="input-field" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <button className="btn-secondary" onClick={exportCajaComercial}>Exportar caja comercial</button>
       </div>
 
       <div className="mt-4 card text-center">
@@ -134,6 +171,12 @@ export default function SalidasAlmacenPage() {
                 {detailsOrder.dispatched_at ? new Date(detailsOrder.dispatched_at).toLocaleString('es-ES') : '—'}
               </p>
             </div>
+            <button
+              className="btn-secondary mt-3"
+              onClick={() => setSignatureOrder(detailsOrder)}
+            >
+              Ver firma de la entrega
+            </button>
             <div className="mt-4 space-y-1.5">
               {detailsOrder.commercial_order_items.map((item) => (
                 <div key={item.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
@@ -145,6 +188,26 @@ export default function SalidasAlmacenPage() {
             <button className="btn-secondary mt-6 w-full" onClick={() => setDetailsOrder(null)}>Cerrar</button>
           </div>
         </div>
+      )}
+
+      {showDirectDelivery && (
+        <DirectDeliveryModal
+          pointsOfSale={pointsOfSale}
+          warehouseId={warehouseId}
+          onClose={() => setShowDirectDelivery(false)}
+          onDone={() => {
+            setShowDirectDelivery(false);
+            load();
+          }}
+        />
+      )}
+
+      {signatureOrder && (
+        <SignatureViewer
+          kind="commercial_order"
+          referenceId={signatureOrder.id}
+          onClose={() => setSignatureOrder(null)}
+        />
       )}
     </div>
   );

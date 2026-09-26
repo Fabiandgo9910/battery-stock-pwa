@@ -22,8 +22,16 @@ interface DriverRow {
   stock: StockRow[];
 }
 
+interface OfficeWallet {
+  cash_balance: number;
+  card_balance: number;
+  last_reset_at: string | null;
+}
+
 export default function BilleterasAdminPage() {
   const [rows, setRows] = useState<DriverRow[]>([]);
+  const [office, setOffice] = useState<OfficeWallet | null>(null);
+  const [officeResetOpen, setOfficeResetOpen] = useState(false);
   const [target, setTarget] = useState<DriverRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -39,12 +47,28 @@ export default function BilleterasAdminPage() {
     const res = await fetch('/api/admin/driver-overview');
     const json = await res.json();
     setRows(json.drivers ?? []);
+    const officeRes = await fetch('/api/admin/office-wallet');
+    const officeJson = await officeRes.json().catch(() => ({}));
+    if (officeRes.ok) setOffice(officeJson.wallet);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
   }, []);
+
+  async function confirmOfficeReset() {
+    setSubmitting(true);
+    const res = await fetch('/api/admin/office-wallet', { method: 'POST' });
+    setSubmitting(false);
+    setOfficeResetOpen(false);
+    if (!res.ok) {
+      toast.error('No se pudo reiniciar la caja de oficina.');
+      return;
+    }
+    toast.success('Caja de oficina reiniciada correctamente.');
+    load();
+  }
 
   async function confirmReset() {
     if (!target) return;
@@ -136,6 +160,43 @@ export default function BilleterasAdminPage() {
         />
       </div>
 
+      {office && (
+        <div className="card mt-6 border-2 border-charge-200">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="font-semibold text-slate-900">🏢 Caja de oficina</p>
+              <p className="text-xs text-slate-400">Dinero recaudado en venta directa de almacén.</p>
+            </div>
+            <button
+              className="btn-secondary"
+              onClick={() => setOfficeResetOpen(true)}
+              disabled={office.cash_balance + office.card_balance === 0}
+            >
+              Reiniciar caja
+            </button>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl bg-slate-50 py-2">
+              <p className="text-[11px] uppercase text-slate-400">💵 Efectivo</p>
+              <p className="font-semibold text-slate-900">{office.cash_balance.toFixed(2)} €</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 py-2">
+              <p className="text-[11px] uppercase text-slate-400">💳 Tarjeta</p>
+              <p className="font-semibold text-slate-900">{office.card_balance.toFixed(2)} €</p>
+            </div>
+            <div className="rounded-xl bg-charge-50 py-2">
+              <p className="text-[11px] uppercase text-charge-700">Total</p>
+              <p className="font-semibold text-charge-700">{(office.cash_balance + office.card_balance).toFixed(2)} €</p>
+            </div>
+          </div>
+          {office.last_reset_at && (
+            <p className="mt-2 text-xs text-slate-400">
+              Último reinicio: {new Date(office.last_reset_at).toLocaleString('es-ES')}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="mt-6 space-y-4">
         {loading && <p className="text-sm text-slate-400">Cargando…</p>}
         {pageItems.map((r) => {
@@ -217,6 +278,17 @@ export default function BilleterasAdminPage() {
       </div>
 
       <Pagination page={page} pageSize={10} total={total} onPageChange={setPage} />
+
+      <ConfirmModal
+        open={officeResetOpen}
+        title="Reiniciar caja de oficina"
+        description={`La caja de oficina (${((office?.cash_balance ?? 0) + (office?.card_balance ?? 0)).toFixed(2)} €) se pondrá a 0. Esta acción queda registrada.`}
+        confirmLabel="Sí, reiniciar"
+        tone="danger"
+        loading={submitting}
+        onConfirm={confirmOfficeReset}
+        onCancel={() => setOfficeResetOpen(false)}
+      />
 
       <ConfirmModal
         open={!!target}

@@ -9,6 +9,7 @@ const updateSchema = z.object({
   phone: z.string().optional(),
   vehicle_plate: z.string().optional(),
   zone: z.string().optional(),
+  driver_code: z.string().optional(),
   active: z.boolean().optional(),
 });
 
@@ -41,8 +42,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join(' · ') }, { status: 400 });
     }
 
-    const { error } = await supabase.from('profiles').update(parsed.data).eq('id', params.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const updateData = { ...parsed.data };
+    if (updateData.driver_code) updateData.driver_code = updateData.driver_code.toUpperCase();
+
+    const { error } = await supabase.from('profiles').update(updateData).eq('id', params.id);
+    if (error) {
+      const message = error.message.includes('idx_profiles_driver_code')
+        ? 'Ese código de conductor ya lo tiene otro conductor. Elige uno distinto.'
+        : error.message;
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('PATCH /api/users/[id]', err);

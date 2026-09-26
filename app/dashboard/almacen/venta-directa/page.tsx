@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
+import SignatureStep, { SignatureResult } from '@/components/SignatureStep';
 import QuantityInput from '@/components/QuantityInput';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
@@ -23,10 +24,13 @@ export default function VentaDirectaAlmacenPage() {
   const [amountCard, setAmountCard] = useState('');
   const [isWarranty, setIsWarranty] = useState(false);
   const [vehiclePlate, setVehiclePlate] = useState('');
+  const [vehicleModel, setVehicleModel] = useState('');
+  const [batteryCode, setBatteryCode] = useState('');
   const [oldBatteryReturned, setOldBatteryReturned] = useState<'si' | 'no' | ''>('');
   const [oldBatteryReason, setOldBatteryReason] = useState('');
   const [saleOrigin, setSaleOrigin] = useState<SaleOrigin>('particular');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [showSignature, setShowSignature] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [photosChecked, setPhotosChecked] = useState(false);
 
@@ -71,6 +75,8 @@ export default function VentaDirectaAlmacenPage() {
     setAmountCard('');
     setIsWarranty(false);
     setVehiclePlate('');
+    setVehicleModel('');
+    setBatteryCode('');
     setOldBatteryReturned('');
     setOldBatteryReason('');
     setPhotosChecked(false);
@@ -79,35 +85,7 @@ export default function VentaDirectaAlmacenPage() {
 
   const total = (Number(amountCash) || 0) + (Number(amountCard) || 0);
 
-  async function submit() {
-    if (quantity <= 0) {
-      toast.error('Indica una cantidad mayor que 0.');
-      return;
-    }
-    if (!isWarranty && total <= 0) {
-      toast.error('Introduce el importe cobrado.');
-      return;
-    }
-    if (availableStock !== null && quantity > availableStock) {
-      toast.error('No hay suficiente stock en almacén para esta venta.');
-      return;
-    }
-    if (!vehiclePlate.trim()) {
-      toast.error('Indica la matrícula del coche.');
-      return;
-    }
-    if (oldBatteryReturned === '') {
-      toast.error('Indica si el cliente entrega la batería vieja.');
-      return;
-    }
-    if (oldBatteryReturned === 'no' && !oldBatteryReason.trim()) {
-      toast.error('Indica el motivo por el que no entrega la batería vieja.');
-      return;
-    }
-    if (!photosChecked) {
-      toast.error('Marca la casilla de fotos antes de continuar.');
-      return;
-    }
+  async function submit(signature: SignatureResult) {
     setSubmitting(true);
     const res = await fetch('/api/warehouse-sale', {
       method: 'POST',
@@ -121,18 +99,32 @@ export default function VentaDirectaAlmacenPage() {
         amount_card: Number(amountCard) || 0,
         is_warranty: isWarranty,
         customer_vehicle_plate: vehiclePlate.trim().toUpperCase(),
+        customer_vehicle_model: vehicleModel.trim() || undefined,
+        battery_code: batteryCode.trim() || undefined,
         old_battery_returned: oldBatteryReturned === 'si',
         old_battery_reason: oldBatteryReturned === 'no' ? oldBatteryReason.trim() : undefined,
         sale_origin: saleOrigin,
+        notes: signature.notes || undefined,
       }),
     });
     const json = await res.json();
     setSubmitting(false);
-    setConfirmOpen(false);
+    setShowSignature(false);
     if (!res.ok) {
       toast.error(json.error || 'Error al registrar la venta');
       return;
     }
+    await fetch('/api/signatures', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'warehouse_sale',
+        reference_id: json.sale_id,
+        signer_name: signature.signerName || undefined,
+        notes: signature.notes || undefined,
+        signature_data_url: signature.signatureDataUrl,
+      }),
+    }).catch(() => {});
     toast.success('Venta registrada directamente desde el almacén.');
     reset();
   }
@@ -178,6 +170,27 @@ export default function VentaDirectaAlmacenPage() {
                   value={vehiclePlate}
                   onChange={(e) => setVehiclePlate(e.target.value)}
                   placeholder="1234ABC"
+                />
+              </div>
+              <div>
+                <label className="label-field">Modelo del coche</label>
+                <input
+                  className="input-field"
+                  value={vehicleModel}
+                  onChange={(e) => setVehicleModel(e.target.value)}
+                  placeholder="Ej: Renault Clio"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div>
+                <label className="label-field">Code de batería (opcional)</label>
+                <input
+                  className="input-field uppercase"
+                  value={batteryCode}
+                  onChange={(e) => setBatteryCode(e.target.value.toUpperCase())}
+                  placeholder="Ej: TK720 SB220801"
                 />
               </div>
               <div>
@@ -280,7 +293,40 @@ export default function VentaDirectaAlmacenPage() {
 
             <div className="mt-6 flex gap-3">
               <button className="btn-secondary flex-1" onClick={reset}>Cancelar</button>
-              <button className="btn-charge flex-1" onClick={() => setConfirmOpen(true)}>
+              <button
+                className="btn-charge flex-1"
+                onClick={() => {
+                  if (quantity <= 0) {
+                    toast.error('Indica una cantidad mayor que 0.');
+                    return;
+                  }
+                  if (!isWarranty && total <= 0) {
+                    toast.error('Introduce el importe cobrado.');
+                    return;
+                  }
+                  if (availableStock !== null && quantity > availableStock) {
+                    toast.error('No hay suficiente stock en almacén para esta venta.');
+                    return;
+                  }
+                  if (!vehiclePlate.trim()) {
+                    toast.error('Indica la matrícula del coche.');
+                    return;
+                  }
+                  if (oldBatteryReturned === '') {
+                    toast.error('Indica si el cliente entrega la batería vieja.');
+                    return;
+                  }
+                  if (oldBatteryReturned === 'no' && !oldBatteryReason.trim()) {
+                    toast.error('Indica el motivo por el que no entrega la batería vieja.');
+                    return;
+                  }
+                  if (!photosChecked) {
+                    toast.error('Marca la casilla de fotos antes de continuar.');
+                    return;
+                  }
+                  setConfirmOpen(true);
+                }}
+              >
                 {isWarranty ? 'Confirmar garantía' : 'Cobrar venta'}
               </button>
             </div>
@@ -294,9 +340,23 @@ export default function VentaDirectaAlmacenPage() {
         description={`${quantity} x ${model?.brand} ${model?.model_name} — ${isWarranty ? `garantía, ${total.toFixed(2)} € de diferencia` : `total ${total.toFixed(2)} €`}.`}
         confirmLabel="Confirmar"
         loading={submitting}
-        onConfirm={submit}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          setShowSignature(true);
+        }}
         onCancel={() => setConfirmOpen(false)}
       />
+
+      {showSignature && (
+        <SignatureStep
+          title="Firma de quien recibe la batería"
+          description="El cliente firma que recibe la batería antes de completar la venta."
+          confirmLabel="Confirmar y completar venta"
+          submitting={submitting}
+          onConfirm={submit}
+          onCancel={() => setShowSignature(false)}
+        />
+      )}
     </div>
   );
 }

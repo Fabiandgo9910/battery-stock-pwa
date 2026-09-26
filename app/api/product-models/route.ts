@@ -84,7 +84,11 @@ export async function POST(req: NextRequest) {
 }
 
 // GET /api/product-models -> lista de modelos activos (para selects, CRUD)
-export async function GET() {
+// GET /api/product-models?search=&page=&pageSize= -> lista paginada en el
+// servidor (nunca trae todo el catálogo de golpe). Sin parámetros, se
+// comporta como antes (útil para integraciones antiguas), pero todo el
+// código nuevo debe pasar search/page/pageSize.
+export async function GET(req: NextRequest) {
   try {
     const supabase = createRouteClient();
     const {
@@ -92,14 +96,37 @@ export async function GET() {
     } = await supabase.auth.getSession();
     if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
 
-    const { data, error } = await supabase
+    const search = req.nextUrl.searchParams.get('search')?.trim() ?? '';
+    const page = Math.max(1, Number(req.nextUrl.searchParams.get('page')) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.nextUrl.searchParams.get('pageSize')) || 8));
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let query = supabase
       .from('product_models')
-      .select('*, product_ean_codes(ean_code)')
+      .select(
+        '*, product_ean_codes(ean_code), warehouse_stock(quantity, warehouse:warehouses(is_warranty_holding))',
+        { count: 'exact' }
+      )
       .eq('active', true)
-      .order('brand');
+      .order('brand')
+      .order('model_name');
+
+    if (search) {
+      // Busca por marca, modelo, referencia o EAN (OR en varias columnas).
+      // Se limpian caracteres que romperían la sintaxis del filtro .or().
+      const safe = search.replace(/[,()]/g, ' ').trim();
+      if (safe) {
+        query = query.or(
+          `brand.ilike.%${safe}%,model_name.ilike.%${safe}%,reference_code.ilike.%${safe}%`
+        );
+      }
+    }
+
+    const { data, error, count } = await query.range(from, to);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ product_models: data });
+    return NextResponse.json({ product_models: data, total: count ?? 0 });
   } catch (err) {
     console.error('GET /api/product-models', err);
     return NextResponse.json({ error: 'Error inesperado al listar los modelos' }, { status: 500 });

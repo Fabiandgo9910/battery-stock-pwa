@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
+import SignatureStep, { SignatureResult } from '@/components/SignatureStep';
 import toast from 'react-hot-toast';
 import { createBrowserClient } from '@/lib/supabaseClient';
 import { useProfile } from '@/hooks/useProfile';
@@ -17,12 +18,15 @@ export default function VenderPage() {
   const [ean, setEan] = useState('');
   const [model, setModel] = useState<ProductModel | null>(null);
   const [myStock, setMyStock] = useState<number | null>(null);
+  const [batteryUnits, setBatteryUnits] = useState<{ id: string; code: string }[]>([]);
+  const [selectedUnitId, setSelectedUnitId] = useState('');
   const [looking, setLooking] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [amountCash, setAmountCash] = useState('');
   const [amountCard, setAmountCard] = useState('');
   const [isWarranty, setIsWarranty] = useState(false);
   const [vehiclePlate, setVehiclePlate] = useState('');
+  const [vehicleModel, setVehicleModel] = useState('');
   const [oldBatteryReturned, setOldBatteryReturned] = useState<'si' | 'no' | ''>('');
   const [oldBatteryReason, setOldBatteryReason] = useState('');
   const [saleOrigin, setSaleOrigin] = useState<SaleOrigin>('particular');
@@ -34,6 +38,7 @@ export default function VenderPage() {
     cobro: false,
   });
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [showSignature, setShowSignature] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -46,6 +51,18 @@ export default function VenderPage() {
         .eq('product_model_id', model.id)
         .maybeSingle();
       setMyStock(data?.quantity ?? 0);
+
+      // Codes de las baterías de este modelo que aún llevo sin montar, para
+      // que elija exactamente cuál está instalando (queda guardado en la venta).
+      const { data: units } = await supabase
+        .from('battery_units')
+        .select('id, code')
+        .eq('driver_id', profile.id)
+        .eq('product_model_id', model.id)
+        .eq('status', 'assigned')
+        .order('code');
+      setBatteryUnits(units ?? []);
+      setSelectedUnitId('');
     }
     checkStock();
   }, [model, profile, supabase]);
@@ -71,11 +88,14 @@ export default function VenderPage() {
     setEan('');
     setModel(null);
     setMyStock(null);
+    setBatteryUnits([]);
+    setSelectedUnitId('');
     setQuantity(1);
     setAmountCash('');
     setAmountCard('');
     setIsWarranty(false);
     setVehiclePlate('');
+    setVehicleModel('');
     setOldBatteryReturned('');
     setOldBatteryReason('');
     setSaleOrigin('particular');
@@ -84,13 +104,17 @@ export default function VenderPage() {
 
   const total = (Number(amountCash) || 0) + (Number(amountCard) || 0);
 
-  async function submit() {
+  async function submit(signature: SignatureResult) {
     if (!isWarranty && total <= 0) {
       toast.error('Introduce el importe cobrado.');
       return;
     }
     if (myStock !== null && quantity > myStock) {
       toast.error('No tienes suficiente stock para esta venta.');
+      return;
+    }
+    if (batteryUnits.length > 0 && !selectedUnitId) {
+      toast.error('Selecciona el code de la batería exacta que estás montando.');
       return;
     }
     if (!vehiclePlate.trim()) {
@@ -121,18 +145,32 @@ export default function VenderPage() {
         amount_card: Number(amountCard) || 0,
         is_warranty: isWarranty,
         customer_vehicle_plate: vehiclePlate.trim().toUpperCase(),
+        customer_vehicle_model: vehicleModel.trim() || undefined,
         old_battery_returned: oldBatteryReturned === 'si',
         old_battery_reason: oldBatteryReturned === 'no' ? oldBatteryReason.trim() : undefined,
         sale_origin: saleOrigin,
+        battery_unit_id: selectedUnitId || undefined,
+        notes: signature.notes || undefined,
       }),
     });
     const json = await res.json();
     setSubmitting(false);
-    setConfirmOpen(false);
+    setShowSignature(false);
     if (!res.ok) {
       toast.error(json.error || 'Error al registrar la venta');
       return;
     }
+    await fetch('/api/signatures', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'warehouse_sale',
+        reference_id: json.sale_id,
+        signer_name: signature.signerName || undefined,
+        notes: signature.notes || undefined,
+        signature_data_url: signature.signatureDataUrl,
+      }),
+    }).catch(() => {});
     toast.success('Venta registrada. Se ha actualizado tu caja.');
     reset();
   }
@@ -163,6 +201,27 @@ export default function VenderPage() {
               <p className="mt-1 text-sm text-slate-500">Tienes en tu furgoneta: <strong>{myStock ?? '…'}</strong></p>
             </div>
 
+            {batteryUnits.length > 0 && (
+              <div className="mt-4 rounded-xl border border-charge-200 bg-charge-50 p-4">
+                <label className="label-field text-charge-800">
+                  Code de la batería que vas a montar *
+                </label>
+                <p className="mb-2 text-xs text-charge-700">
+                  Mira el code pegado en la batería y selecciónalo aquí.
+                </p>
+                <select
+                  className="input-field"
+                  value={selectedUnitId}
+                  onChange={(e) => setSelectedUnitId(e.target.value)}
+                >
+                  <option value="">Selecciona el code…</option>
+                  {batteryUnits.map((u) => (
+                    <option key={u.id} value={u.id}>{u.code}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="mt-4">
               <label className="label-field">Cantidad (siempre 1 en venta de conductor)</label>
               <input
@@ -184,17 +243,27 @@ export default function VenderPage() {
                 />
               </div>
               <div>
-                <label className="label-field">¿Entrega batería vieja? *</label>
-                <select
+                <label className="label-field">Modelo del coche</label>
+                <input
                   className="input-field"
-                  value={oldBatteryReturned}
-                  onChange={(e) => setOldBatteryReturned(e.target.value as 'si' | 'no')}
-                >
-                  <option value="">Selecciona…</option>
-                  <option value="si">Sí</option>
-                  <option value="no">No</option>
-                </select>
+                  value={vehicleModel}
+                  onChange={(e) => setVehicleModel(e.target.value)}
+                  placeholder="Ej: Renault Clio"
+                />
               </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="label-field">¿Entrega batería vieja? *</label>
+              <select
+                className="input-field"
+                value={oldBatteryReturned}
+                onChange={(e) => setOldBatteryReturned(e.target.value as 'si' | 'no')}
+              >
+                <option value="">Selecciona…</option>
+                <option value="si">Sí</option>
+                <option value="no">No</option>
+              </select>
             </div>
 
             {oldBatteryReturned === 'no' && (
@@ -310,10 +379,23 @@ export default function VenderPage() {
         title="Confirmar venta"
         description={`${quantity} x ${model?.brand} ${model?.model_name} — ${isWarranty ? `garantía, ${total.toFixed(2)} € de diferencia` : `total ${total.toFixed(2)} €`}. Matrícula: ${vehiclePlate.toUpperCase()}.`}
         confirmLabel="Confirmar"
-        loading={submitting}
-        onConfirm={submit}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          setShowSignature(true);
+        }}
         onCancel={() => setConfirmOpen(false)}
       />
+
+      {showSignature && (
+        <SignatureStep
+          title="Firma de quien recibe la batería"
+          description="El cliente firma que recibe la batería antes de completar la venta."
+          confirmLabel="Confirmar y completar venta"
+          submitting={submitting}
+          onConfirm={submit}
+          onCancel={() => setShowSignature(false)}
+        />
+      )}
     </div>
   );
 }
